@@ -35,6 +35,12 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.os.Message;
+import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,13 +52,15 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     private LinearLayout splashLayout;
-
+    private FrameLayout rootContainer;
+    private WebView popupWebView;
+    
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         enableFullscreen();
 
-        FrameLayout rootContainer = new FrameLayout(this);
+         rootContainer = new FrameLayout(this);
         rootContainer.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
@@ -211,7 +219,15 @@ public class MainActivity extends AppCompatActivity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
-
+        settings.setSupportMultipleWindows(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        String ua = settings.getUserAgentString();
+        if (ua != null) settings.setUserAgentString(ua.replace("; wv", ""));
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setAcceptThirdPartyCookies(webView, true);
+        webView.addJavascriptInterface(new AndroidSessionBridge(this), "AndroidSessionBridge");
+        
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -225,11 +241,25 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {
                 }
                 return true;
+                  
+                      }
+                  @Override      
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                injectSessionStorageBridge(view);
             }
+
+            @Override
+            public void onLoadResource(WebView view, String url) {
+                super.onLoadResource(view, url);
+                injectSessionStorageBridge(view);
+            }
+            
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                injectSessionStorageBridge(view);
                 hideSplashScreen();
             }
         });
@@ -238,6 +268,54 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
                 runOnUiThread(() -> request.grant(request.getResources()));
+            }
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                WebView childView = new WebView(MainActivity.this);
+                WebSettings childSettings = childView.getSettings();
+                childSettings.setJavaScriptEnabled(true);
+                childSettings.setDomStorageEnabled(true);
+                childSettings.setSupportMultipleWindows(true);
+                childSettings.setJavaScriptCanOpenWindowsAutomatically(true);
+                String ua = childSettings.getUserAgentString();
+                if (ua != null) childSettings.setUserAgentString(ua.replace("; wv", ""));
+                CookieManager.getInstance().setAcceptCookie(true);
+                CookieManager.getInstance().setAcceptThirdPartyCookies(childView, true);
+                childView.addJavascriptInterface(new AndroidSessionBridge(MainActivity.this), "AndroidSessionBridge");
+                childView.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                        super.onPageStarted(v, url, favicon);
+                        injectSessionStorageBridge(v);
+                    }
+                    @Override
+                    public void onLoadResource(WebView v, String url) {
+                        super.onLoadResource(v, url);
+                        injectSessionStorageBridge(v);
+                    }
+                    @Override
+                    public void onPageFinished(WebView v, String url) {
+                        super.onPageFinished(v, url);
+                        injectSessionStorageBridge(v);
+                    }
+                });
+                childView.setWebChromeClient(new WebChromeClient() {
+                    @Override
+                    public void onCloseWindow(WebView window) {
+                        closePopupWebView(window);
+                    }
+                });
+                popupWebView = childView;
+                rootContainer.addView(childView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(childView);
+                resultMsg.sendToTarget();
+                return true;
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                closePopupWebView(window);
             }
         });
 
@@ -266,7 +344,96 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+    private void closePopupWebView(WebView window) {
+        if (window != null) {
+            if (window.getParent() instanceof ViewGroup) {
+                ((ViewGroup) window.getParent()).removeView(window);
+            }
+            if (window == popupWebView) {
+                popupWebView = null;
+            }
+            window.destroy();
+        }
+    }
 
+    private void injectSessionStorageBridge(WebView view) {
+        if (view == null) return;
+        String js = "(function() {" +
+            "try {" +
+            "if (window.AndroidSessionBridge) {" +
+            "var saved = JSON.parse(window.AndroidSessionBridge.getAllItemsJson() || '{}');" +
+            "for (var k in saved) {" +
+            "if (Object.prototype.hasOwnProperty.call(saved, k)) {" +
+            "try { window.sessionStorage.setItem(k, saved[k]); } catch(e) {}" +
+            "}" +
+            "}" +
+            "if (!window.__sessionBridgeHooked) {" +
+            "window.__sessionBridgeHooked = true;" +
+            "var origSetItem = Storage.prototype.setItem;" +
+            "Storage.prototype.setItem = function(key, val) {" +
+            "origSetItem.apply(this, arguments);" +
+            "if (this === window.sessionStorage && window.AndroidSessionBridge) {" +
+            "try { window.AndroidSessionBridge.setItem(String(key), String(val)); } catch(e) {}" +
+            "}" +
+            "};" +
+            "var origRemoveItem = Storage.prototype.removeItem;" +
+            "Storage.prototype.removeItem = function(key) {" +
+            "origRemoveItem.apply(this, arguments);" +
+            "if (this === window.sessionStorage && window.AndroidSessionBridge) {" +
+            "try { window.AndroidSessionBridge.removeItem(String(key)); } catch(e) {}" +
+            "}" +
+            "};" +
+            "var origClear = Storage.prototype.clear;" +
+            "Storage.prototype.clear = function() {" +
+            "origClear.apply(this);" +
+            "if (this === window.sessionStorage && window.AndroidSessionBridge) {" +
+            "try { window.AndroidSessionBridge.clear(); } catch(e) {}" +
+            "}" +
+            "};" +
+            "}" +
+            "}" +
+            "} catch(err) {}" +
+            "})();";
+        view.evaluateJavascript(js, null);
+    }
+
+    private static class AndroidSessionBridge {
+        private final SharedPreferences prefs;
+
+        AndroidSessionBridge(Context context) {
+            prefs = context.getSharedPreferences("web_session_storage", Context.MODE_PRIVATE);
+        }
+
+        @JavascriptInterface
+        public void setItem(String key, String value) {
+            if (key != null) {
+                prefs.edit().putString(key, value != null ? value : "").apply();
+            }
+        }
+
+        @JavascriptInterface
+        public void removeItem(String key) {
+            if (key != null) {
+                prefs.edit().remove(key).apply();
+            }
+        }
+
+        @JavascriptInterface
+        public void clear() {
+            prefs.edit().clear().apply();
+        }
+
+        @JavascriptInterface
+        public String getAllItemsJson() {
+            try {
+                JSONObject obj = new JSONObject(prefs.getAll());
+                return obj.toString();
+            } catch (Exception e) {
+                return "{}";
+            }
+        }
+    }
+    
     private void requestAppPermissions() {
         List<String> permissions = new ArrayList<>();
         permissions.add(Manifest.permission.CAMERA);

@@ -1,7 +1,4 @@
 package com.aistudio.edutechmindset.bfkqaz;
-
-import android.Manifest;
-import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -69,6 +66,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
 import org.json.JSONObject;
 
@@ -102,8 +100,10 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout popupContainer;
     private WebView popupWebView;
     private IntroSplashView splashView;
-
+private Uri cameraCaptureUri;
+    private PermissionRequest pendingWebPermissionRequest;
     private ValueCallback<Uri[]> fileUploadCallback;
+    
     private SharedPreferences sessionPrefs;
     private File vaultDir;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -244,7 +244,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
-                runOnUiThread(() -> request.grant(request.getResources()));
+                runOnUiThread(() -> { boolean camOk = ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED; boolean micOk = ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED; if (camOk && micOk) { request.grant(request.getResources()); } else { pendingWebPermissionRequest = request; ActivityCompat.requestPermissions(MainActivity.this, new String[]{android.Manifest.permission.CAMERA, android.Manifest.permission.RECORD_AUDIO}, 105); } });
             }
 
             @Override
@@ -254,7 +254,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 fileUploadCallback = filePathCallback;
                 try {
-                    Intent intent = fileChooserParams.createIntent();
+                    Intent contentIntent = fileChooserParams.createIntent(); if (fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) { contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); } Intent takePictureIntent = null; cameraCaptureUri = null; if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) { try { java.io.File photoFile = java.io.File.createTempFile("cam_" + System.currentTimeMillis(), ".jpg", getCacheDir()); cameraCaptureUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", photoFile); takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE); takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraCaptureUri); takePictureIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { cameraCaptureUri = null; takePictureIntent = null; } } Intent intent = Intent.createChooser(contentIntent, "اختر ملفاً أو التقط صورة بالكاميرا"); if (takePictureIntent != null) { intent.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{takePictureIntent}); }
                     startActivityForResult(intent, REQ_FILE_CHOOSER);
                 } catch (Exception e) {
                     fileUploadCallback = null;
@@ -272,7 +272,7 @@ public class MainActivity extends AppCompatActivity {
                 if (url.startsWith("data:")) {
                     saveDataUrlToDevice(url, fileName, mimeType);
                 } else if (url.startsWith("blob:")) {
-                    String js = "javascript:(function(){fetch('" + url + "').then(r=>r.blob()).then(b=>{var fr=new FileReader();fr.onloadend=function(){AndroidVaultBridge.saveBase64File(fr.result,'" + fileName.replace("'", "") + "','" + (mimeType != null ? mimeType : "application/octet-stream") + "');};fr.readAsDataURL(b);});})();";
+                    String safeName = fileName.replace("'", ""); String safeMime = (mimeType != null ? mimeType : "application/octet-stream"); String js = "javascript:(function(){var b=(window.__edutechBlobs&&window.__edutechBlobs['" + url + "'])||null;var send=function(bl){var fr=new FileReader();fr.onloadend=function(){(window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File?window.AndroidSessionBridge:window.AndroidVaultBridge).saveBase64File(fr.result,'" + safeName + "','" + safeMime + "');};fr.readAsDataURL(bl);};if(b){send(b);}else{fetch('" + url + "').then(r=>r.blob()).then(send).catch(function(){if(window.AndroidVaultBridge&&window.AndroidVaultBridge.printCurrentPage)window.AndroidVaultBridge.printCurrentPage();});}})();";
                     webView.evaluateJavascript(js, null);
                 } else {
                     downloadHttpFileToDevice(url, fileName, mimeType);
@@ -312,7 +312,7 @@ public class MainActivity extends AppCompatActivity {
                 "var origSet=sessionStorage.setItem;sessionStorage.setItem=function(k,v){origSet.apply(this,arguments);sync();};" +
                 "var origRem=sessionStorage.removeItem;sessionStorage.removeItem=function(k){origRem.apply(this,arguments);sync();};" +
                 "window.addEventListener('beforeunload',sync);" +
-                "window.print=function(){if(window.AndroidVaultBridge)window.AndroidVaultBridge.printCurrentPage();};" +
+                "window.print=function(){if(window.AndroidVaultBridge)window.AndroidVaultBridge.printCurrentPage();};" + "window.__edutechBlobs=window.__edutechBlobs||{};var origCreateObj=URL.createObjectURL;URL.createObjectURL=function(obj){var u=origCreateObj.apply(this,arguments);try{window.__edutechBlobs[u]=obj;}catch(e){}return u;};var origClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){try{var h=this.getAttribute('href')||this.href||'';var dl=this.getAttribute('download')||'';if(h.indexOf('blob:')===0||h.indexOf('data:')===0||this.hasAttribute('download')){var fn=dl||('download_'+Date.now());if(h.indexOf('data:')===0){if(window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(h,fn,'');return;}}else if(h.indexOf('blob:')===0){var blob=window.__edutechBlobs[h];var sendBlob=function(b){var r=new FileReader();r.onloadend=function(){if(r.result&&window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(r.result,fn,b.type||'');}};r.readAsDataURL(b);};if(blob){sendBlob(blob);return;}else{fetch(h).then(function(res){return res.blob();}).then(sendBlob);return;}}}}catch(e){}return origClick.apply(this,arguments);};" + "window.__edutechBlobs=window.__edutechBlobs||{};var origCreateObj=URL.createObjectURL;URL.createObjectURL=function(obj){var u=origCreateObj.apply(this,arguments);try{window.__edutechBlobs[u]=obj;}catch(e){}return u;};var origClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){try{var h=this.getAttribute('href')||this.href||'';var dl=this.getAttribute('download')||'';if(h.indexOf('blob:')===0||h.indexOf('data:')===0||this.hasAttribute('download')){var fn=dl||('download_'+Date.now());if(h.indexOf('data:')===0){if(window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(h,fn,'');return;}}else if(h.indexOf('blob:')===0){var blob=window.__edutechBlobs[h];var sendBlob=function(b){var r=new FileReader();r.onloadend=function(){if(r.result&&window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(r.result,fn,b.type||'');}};r.readAsDataURL(b);};if(blob){sendBlob(blob);return;}else{fetch(h).then(function(res){return res.blob();}).then(sendBlob);return;}}}}catch(e){}return origClick.apply(this,arguments);};" +
                 "}}" +
                 "}catch(e){}" +
                 "})();";
@@ -824,12 +824,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) { super.onRequestPermissionsResult(requestCode, permissions, grantResults); if (requestCode == 105 && pendingWebPermissionRequest != null) { boolean ok = grantResults.length > 0; for (int r : grantResults) { if (r != PackageManager.PERMISSION_GRANTED) { ok = false; break; } } if (ok) { pendingWebPermissionRequest.grant(pendingWebPermissionRequest.getResources()); } else { pendingWebPermissionRequest.deny(); } pendingWebPermissionRequest = null; } } @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_FILE_CHOOSER) {
             if (fileUploadCallback != null) {
-                Uri[] results = (resultCode == Activity.RESULT_OK && data != null && data.getData() != null)
-                        ? new Uri[]{data.getData()} : null;
+                Uri[] results = null; if (resultCode == Activity.RESULT_OK) { if (data != null && data.getClipData() != null) { int count = data.getClipData().getItemCount(); results = new Uri[count]; for (int i = 0; i < count; i++) { results[i] = data.getClipData().getItemAt(i).getUri(); } } else if (data != null && data.getData() != null) { results = new Uri[]{data.getData()}; } else if (cameraCaptureUri != null) { results = new Uri[]{cameraCaptureUri}; } } cameraCaptureUri = null;
+                        //
                 fileUploadCallback.onReceiveValue(results);
                 fileUploadCallback = null;
             }
@@ -927,7 +927,8 @@ public class MainActivity extends AppCompatActivity {
     private int dpToPx(int dp) {
         return Math.round(dp * getResources().getDisplayMetrics().density);
     }
-
+    private void triggerNativePrint() { new AndroidVaultBridge().printCurrentPage(); }
+    
     public class AndroidSessionBridge {
         @JavascriptInterface
         public void saveSession(String json) {
@@ -939,7 +940,7 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public String getSession() {
             return sessionPrefs.getString(KEY_SESSION_JSON, "{}");
-        }
+        } @JavascriptInterface public void saveBase64File(String dataUrl, String fileName, String mimeType) { saveDataUrlToDevice(dataUrl, fileName, mimeType); }
     }
 
     public class AndroidVaultBridge {

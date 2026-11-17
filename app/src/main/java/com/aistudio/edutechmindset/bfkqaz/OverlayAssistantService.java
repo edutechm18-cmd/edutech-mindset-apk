@@ -25,15 +25,19 @@ import android.view.View;
 import android.view.WindowManager;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.TextView;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 
 public class OverlayAssistantService extends Service {
 
     public static final String ACTION_STOP = "com.aistudio.edutechmindset.bfkqaz.STOP_OVERLAY";
+public static final String ACTION_HIDE = "HIDE_OVERLAY";
+public static final String ACTION_SHOW = "SHOW_OVERLAY";
     private static final String CHANNEL_ID = "edutech_overlay_channel";
     private static final int NOTIFICATION_ID = 2026;
 
     private WindowManager windowManager;
-    private TextView floatingButton;
+    private FrameLayout floatingButton;
     private WindowManager.LayoutParams params;
     private ObjectAnimator pulseAnimator;
 
@@ -50,6 +54,11 @@ public class OverlayAssistantService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+if (intent != null && ACTION_HIDE.equals(intent.getAction())) {
+    if (floatingButton != null) floatingButton.setVisibility(View.GONE);
+} else if (intent != null && ACTION_SHOW.equals(intent.getAction())) {
+    if (floatingButton != null) floatingButton.setVisibility(View.VISIBLE);
+}
         return START_STICKY;
     }
 
@@ -115,13 +124,16 @@ public class OverlayAssistantService extends Service {
         params.x = 40;
         params.y = 320;
 
-        floatingButton = new TextView(this);
-        floatingButton.setText("🤖 مساعدي");
-        floatingButton.setTextColor(Color.WHITE);
-        floatingButton.setTextSize(14f);
-        int padH = dpToPx(14);
-        int padV = dpToPx(10);
-        floatingButton.setPadding(padH, padV, padH, padV);
+       floatingButton = new FrameLayout(this);
+int iconSize = dpToPx(46);
+int pad = dpToPx(3);
+floatingButton.setPadding(pad, pad, pad, pad);
+ImageView iconView = new ImageView(this);
+iconView.setImageResource(R.mipmap.ic_launcher);
+iconView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(iconSize, iconSize);
+iconLp.gravity = Gravity.CENTER;
+floatingButton.addView(iconView, iconLp);
 
         GradientDrawable bg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,

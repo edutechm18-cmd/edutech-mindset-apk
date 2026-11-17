@@ -1,26 +1,28 @@
 package com.aistudio.edutechmindset.bfkqaz;
-import android.annotation.SuppressLint; import android.Manifest; import android.animation.ValueAnimator; import android.animation.ObjectAnimator; import android.animation.PropertyValuesHolder;
-import android.app.Activity;
+
+import android.Manifest;
+import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
 import android.app.AlertDialog;
 import android.app.Dialog;
-import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Paint;
-import android.graphics.RadialGradient;
-import android.graphics.Shader;
-import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfRenderer;
+import android.media.AudioAttributes;
 import android.media.MediaPlayer;
 import android.media.PlaybackParams;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -28,49 +30,52 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
-import android.os.VibrationEffect;
-import android.os.Vibrator;
-import android.print.PrintAttributes;
-import android.print.PrintManager;
 import android.provider.MediaStore;
-import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.speech.RecognizerIntent;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.Base64;
 import android.view.Gravity;
-import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.view.animation.LinearInterpolator;
+import android.view.WindowManager;
+import android.webkit.ConsoleMessage;
 import android.webkit.CookieManager;
-import android.webkit.DownloadListener;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
-import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.MediaController;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
-import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.VideoView;
 
-import androidx.appcompat.app.AppCompatActivity; import androidx.core.graphics.Insets; import androidx.core.view.ViewCompat; import androidx.core.view.WindowCompat; import androidx.core.view.WindowInsetsCompat; import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -86,959 +91,869 @@ import java.util.Random;
 public class MainActivity extends AppCompatActivity {
 
     private static final String HOME_URL = "https://edutech-mindset.pages.dev";
-    private static final String PREFS_SESSION = "edutech_session_prefs";
+    private static final String PREFS_NAME = "edutech_prefs";
     private static final String KEY_SESSION_JSON = "session_storage_json";
+    private static final int REQ_PERMS = 1001;
+    private static final int REQ_FILE = 1002;
+    private static final int REQ_VOICE = 1004;
+    private static final int REQ_OVERLAY = 1005;
 
-    private static final int REQ_PERMISSIONS = 1001;
-    private static final int REQ_FILE_CHOOSER = 1002;
-    private static final int REQ_IMPORT_VAULT = 1003;
-    private static final int REQ_VOICE_INPUT = 1004;
-    private static final int REQ_OVERLAY_PERMISSION = 1005;
-
-    private FrameLayout rootLayout; private LinearLayout mainColumn; private LinearLayout audioPlayerBar; private LinearLayout bottomControlBar;
+    private FrameLayout rootLayout;
     private WebView webView;
-    private FrameLayout popupContainer;
-    private WebView popupWebView;
-    private IntroSplashView splashView;
-private Uri cameraCaptureUri;
-    private PermissionRequest pendingWebPermissionRequest;
-    private ValueCallback<Uri[]> fileUploadCallback;
-    
-    private SharedPreferences sessionPrefs;
-    private File vaultDir;
+    private ProgressBar progressBar;
+    private FrameLayout assistButton;
+    private LinearLayout offlineOverlay;
+    private FrameLayout splashOverlay;
+    private MediaPlayer introVoicePlayer;
+    private ValueCallback<Uri[]> filePathCallback;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean doubleBackToExit = false;
+    private boolean splashDismissed = false;
 
-    @SuppressLint("SetJavaScriptEnabled")
+    private static final String SMART_BRIDGE_JS =
+        "(function(){" +
+        "if(window.__eduBridgeInstalled) return;" +
+        "window.__eduBridgeInstalled = true;" +
+        "window.__inAnchorClick = false;" +
+        "window.__inSaveItem = false;" +
+        "function saveItemSafe(dataUrl, name){" +
+        "  if(window.__inSaveItem) return;" +
+        "  window.__inSaveItem = true;" +
+        "  try{" +
+        "    if(window.AndroidVault && dataUrl){ window.AndroidVault.saveDataUrl(String(dataUrl), String(name||'file')); }" +
+        "  }finally{ setTimeout(function(){ window.__inSaveItem = false; }, 250); }" +
+        "}" +
+        "document.addEventListener('click', function(e){" +
+        "  if(window.__inAnchorClick) return;" +
+        "  var a = e.target && e.target.closest ? e.target.closest('a[download],a[href^=\"data:\"],a[href^=\"blob:\"]') : null;" +
+        "  if(!a) return;" +
+        "  var href = a.getAttribute('href') || '';" +
+        "  if(href.indexOf('data:')===0){" +
+        "    e.preventDefault(); window.__inAnchorClick = true;" +
+        "    try{ saveItemSafe(href, a.getAttribute('download')||'edutech_file'); }finally{ setTimeout(function(){ window.__inAnchorClick = false; }, 250); }" +
+        "  } else if(href.indexOf('blob:')===0){" +
+        "    e.preventDefault(); window.__inAnchorClick = true;" +
+        "    fetch(href).then(function(r){return r.blob();}).then(function(b){" +
+        "      var rd = new FileReader(); rd.onloadend = function(){ saveItemSafe(rd.result, a.getAttribute('download')||'edutech_file'); }; rd.readAsDataURL(b);" +
+        "    }).finally(function(){ setTimeout(function(){ window.__inAnchorClick = false; }, 250); });" +
+        "  }" +
+        "}, true);" +
+        "})();";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        sessionPrefs = getSharedPreferences(PREFS_SESSION, MODE_PRIVATE);
-        vaultDir = new File(getFilesDir(), "EduTechVault");
-        if (!vaultDir.exists()) {
-            vaultDir.mkdirs();
-        }
-
-        setupCleanSystemBars(); rootLayout = new FrameLayout(this); mainColumn = new LinearLayout(this); mainColumn.setOrientation(LinearLayout.VERTICAL); mainColumn.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)); rootLayout.addView(mainColumn); ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, windowInsets) -> { Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()); v.setPadding(insets.left, insets.top, insets.right, insets.bottom); return WindowInsetsCompat.CONSUMED; });
-        rootLayout.setBackgroundColor(Color.parseColor("#0F172A"));
+        setupImmersiveFullScreen();
+        rootLayout = new FrameLayout(this);
+        rootLayout.setBackgroundColor(Color.parseColor("#0B1120"));
         setContentView(rootLayout);
 
-        setupWebView();
-        setupBottomActionBar();
-        setupPopupContainer();
-        setupIntroMotionGraphics();
+        webView = new WebView(this);
+        webView.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        rootLayout.addView(webView);
 
-        requestAppPermissions();
-        webView.loadUrl(HOME_URL);
+        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        FrameLayout.LayoutParams pbLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3));
+        pbLp.gravity = Gravity.TOP;
+        rootLayout.addView(progressBar, pbLp);
 
-        handleIncomingIntent(getIntent()); if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)) { try { Intent overlaySvc = new Intent(this, OverlayAssistantService.class); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(overlaySvc); else startService(overlaySvc); } catch (Exception ignored) {} }
+        configureWebView();
+        setupOfflineOverlay();
+        setupDraggableAssistantButton();
+        setupIntroSplash();
+        requestNeededPermissions();
+
+        if (isNetworkAvailable()) {
+            webView.loadUrl(HOME_URL);
+        } else {
+            offlineOverlay.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void setupImmersiveFullScreen() {
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
+        WindowInsetsControllerCompat ctrl = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        if (ctrl != null) {
+            ctrl.hide(WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.navigationBars());
+            ctrl.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        }
     }
 
     @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        handleIncomingIntent(intent);
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) setupImmersiveFullScreen();
     }
 
-    private void handleIncomingIntent(Intent intent) {
-        if (intent == null) return;
-        if (intent.getBooleanExtra("OPEN_VOICE_ASSISTANT", false)) {
-            mainHandler.postDelayed(this::startVoiceRecognition, 600);
-        } else if (Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
-            String url = intent.getData().toString();
-            if (url.contains("edutech-mindset.pages.dev") && webView != null) {
-                webView.loadUrl(url);
-            }
+    @Override
+    protected void onResume() {
+        super.onResume();
+        setupImmersiveFullScreen();
+        sendOverlayAction(OverlayAssistantService.ACTION_HIDE);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (Settings.canDrawOverlays(this)) {
+            sendOverlayAction(OverlayAssistantService.ACTION_SHOW);
         }
     }
 
-    private void setupCleanSystemBars() { WindowCompat.setDecorFitsSystemWindows(getWindow(), false); getWindow().setStatusBarColor(Color.parseColor("#0B1120")); getWindow().setNavigationBarColor(Color.parseColor("#0F172A")); WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()); if (c != null) { c.setAppearanceLightStatusBars(false); c.setAppearanceLightNavigationBars(false); } } @SuppressLint("SetJavaScriptEnabled")
-    private void setupWebView() {
-        webView = new WebView(this);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        );
-         
-        webView.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+    private void sendOverlayAction(String action) {
+        try {
+            if (!Settings.canDrawOverlays(this)) return;
+            Intent i = new Intent(this, OverlayAssistantService.class);
+            i.setAction(action);
+            startService(i);
+        } catch (Exception ignored) {}
+    }
 
-        configureWebSettings(webView.getSettings());
-        CookieManager cm = CookieManager.getInstance();
-        cm.setAcceptCookie(true);
-        cm.setAcceptThirdPartyCookies(webView, true);
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
 
-        webView.addJavascriptInterface(new AndroidSessionBridge(), "AndroidSessionBridge");
-        webView.addJavascriptInterface(new AndroidVaultBridge(), "AndroidVaultBridge");
+    private boolean isNetworkAvailable() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return true;
+        NetworkInfo ni = cm.getActiveNetworkInfo();
+        return ni != null && ni.isConnected();
+    }
+
+    private void requestNeededPermissions() {
+        List<String> perms = new ArrayList<>();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+            perms.add(Manifest.permission.RECORD_AUDIO);
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+            perms.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        if (!perms.isEmpty()) ActivityCompat.requestPermissions(this, perms.toArray(new String[0]), REQ_PERMS);
+    }
+    private void configureWebView() {
+        WebSettings s = webView.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setAllowFileAccess(true);
+        s.setAllowContentAccess(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+
+        webView.addJavascriptInterface(new AndroidVaultBridge(), "AndroidVault");
+        webView.addJavascriptInterface(new AndroidSessionBridge(), "AndroidSession");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                super.onPageStarted(view, url, favicon);
-                injectSessionAndPrintHooks(view);
-            }
-
-            @Override
-            public void onLoadResource(WebView view, String url) {
-                super.onLoadResource(view, url);
-                if (url != null && (url.contains("accounts.google.com") || url.contains("firebase") || url.contains("edutech-mindset"))) {
-                    injectSessionAndPrintHooks(view);
-                }
+                offlineOverlay.setVisibility(View.GONE);
+                progressBar.setVisibility(View.VISIBLE);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                injectSessionAndPrintHooks(view);
-                CookieManager.getInstance().flush();
+                progressBar.setVisibility(View.GONE);
+                view.evaluateJavascript(SMART_BRIDGE_JS, null);
+                String saved = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(KEY_SESSION_JSON, "");
+                if (!saved.isEmpty()) {
+                    view.evaluateJavascript("try{var d=" + JSONObject.quote(saved) + ";var o=JSON.parse(d);for(var k in o)sessionStorage.setItem(k,o[k]);}catch(e){}", null);
+                }
             }
 
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                Uri uri = request.getUrl();
-                return handleUrlNavigation(uri);
+            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
+                if (req != null && req.isForMainFrame()) {
+                    offlineOverlay.setVisibility(View.VISIBLE);
+                }
             }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
-            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
-                popupWebView = new WebView(MainActivity.this);
-                configureWebSettings(popupWebView.getSettings());
-                CookieManager.getInstance().setAcceptThirdPartyCookies(popupWebView, true);
-                popupWebView.addJavascriptInterface(new AndroidSessionBridge(), "AndroidSessionBridge");
-                popupWebView.setWebViewClient(new WebViewClient() {
-                    @Override
-                    public void onPageFinished(WebView v, String url) {
-                        injectSessionAndPrintHooks(v);
-                        CookieManager.getInstance().flush();
-                    }
-
-                    @Override
-                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
-                        return handleUrlNavigation(request.getUrl());
-                    }
-                });
-                popupWebView.setWebChromeClient(new WebChromeClient() {
-                    @Override
-                    public void onCloseWindow(WebView window) {
-                        closePopupWebView();
-                    }
-                });
-
-                popupContainer.removeAllViews();
-                popupContainer.addView(popupWebView, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                popupContainer.setVisibility(View.VISIBLE);
-
-                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
-                transport.setWebView(popupWebView);
-                resultMsg.sendToTarget();
-                return true;
+            public void onProgressChanged(WebView view, int newProgress) {
+                progressBar.setProgress(newProgress);
+                progressBar.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
             }
 
             @Override
-            public void onCloseWindow(WebView window) {
-                closePopupWebView();
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> request.grant(request.getResources()));
             }
 
             @Override
-            public void onPermissionRequest(final PermissionRequest request) {
-                runOnUiThread(() -> { boolean camOk = ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED; boolean micOk = ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED; if (camOk && micOk) { request.grant(request.getResources()); } else { pendingWebPermissionRequest = request; ActivityCompat.requestPermissions(MainActivity.this, new String[]{android.Manifest.permission.CAMERA, android.Manifest.permission.RECORD_AUDIO}, 105); } });
-            }
-
-            @Override
-            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
-                if (fileUploadCallback != null) {
-                    fileUploadCallback.onReceiveValue(null);
-                }
-                fileUploadCallback = filePathCallback;
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> cb, FileChooserParams params) {
+                if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                filePathCallback = cb;
                 try {
-                    Intent contentIntent = new Intent(Intent.ACTION_GET_CONTENT); contentIntent.addCategory(Intent.CATEGORY_OPENABLE); contentIntent.setType("*/*"); contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); if (fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) { contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); } Intent takePictureIntent = null; cameraCaptureUri = null; if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) { try { java.io.File photoFile = java.io.File.createTempFile("cam_" + System.currentTimeMillis(), ".jpg", getCacheDir()); cameraCaptureUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", photoFile); takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE); takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraCaptureUri); takePictureIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { cameraCaptureUri = null; takePictureIntent = null; } } Intent intent = Intent.createChooser(contentIntent, "اختر ملفاً أو التقط صورة بالكاميرا"); if (takePictureIntent != null) { intent.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{takePictureIntent}); }
-                    startActivityForResult(intent, REQ_FILE_CHOOSER);
+                    startActivityForResult(params.createIntent(), REQ_FILE);
+                    return true;
                 } catch (Exception e) {
-                    fileUploadCallback = null;
+                    filePathCallback = null;
                     return false;
                 }
-                return true;
             }
-        });
 
-        webView.setDownloadListener(new DownloadListener() {
             @Override
-            public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-                triggerHaptic(webView);
-                String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
-                if (url.startsWith("data:")) {
-                    saveDataUrlToDevice(url, fileName, mimeType);
-                } else if (url.startsWith("blob:")) {
-                    String safeName = fileName.replace("'", ""); String safeMime = (mimeType != null ? mimeType : "application/octet-stream"); String js = "javascript:(function(){var b=(window.__edutechBlobs&&window.__edutechBlobs['" + url + "'])||null;var send=function(bl){var fr=new FileReader();fr.onloadend=function(){(window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File?window.AndroidSessionBridge:window.AndroidVaultBridge).saveBase64File(fr.result,'" + safeName + "','" + safeMime + "');};fr.readAsDataURL(bl);};if(b){send(b);}else{fetch('" + url + "').then(r=>r.blob()).then(send).catch(function(){if(window.AndroidVaultBridge&&window.AndroidVaultBridge.printCurrentPage)window.AndroidVaultBridge.printCurrentPage();});}})();";
-                    webView.evaluateJavascript(js, null);
-                } else {
-                    downloadHttpFileToDevice(url, fileName, mimeType);
-                }
-            }
+            public boolean onConsoleMessage(ConsoleMessage cm) { return true; }
         });
 
-        mainColumn.addView(webView);
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private void configureWebSettings(WebSettings settings) {
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setJavaScriptCanOpenWindowsAutomatically(true);
-        settings.setSupportMultipleWindows(true);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        String ua = settings.getUserAgentString();
-        if (ua != null) {
-            ua = ua.replace("; wv", "").replace("wv)", ")");
-            settings.setUserAgentString(ua);
-        }
-    }
-
-    private static final String SESSION_AND_FILE_BRIDGE_JS = "(function(){if(window.__edutechFileBridge)return;window.__edutechFileBridge=true;function sendToApp(u,fn,mt){if(!u)return false;if(u.indexOf('data:')===0){if(window.AndroidSessionBridge)window.AndroidSessionBridge.saveBase64File(u,fn||('file_'+Date.now()),mt||'application/octet-stream');return true;}if(u.indexOf('blob:')===0){fetch(u).then(function(r){return r.blob();}).then(function(b){var fr=new FileReader();fr.onloadend=function(){if(window.AndroidSessionBridge)window.AndroidSessionBridge.saveBase64File(fr.result,fn||('file_'+Date.now()),b.type||mt||'application/octet-stream');};fr.readAsDataURL(b);}).catch(function(){});return true;}return false;}var origClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){var u=this.getAttribute('href')||this.href||'';var dl=this.getAttribute('download');if(dl!==null||u.indexOf('blob:')===0||u.indexOf('data:')===0){if(sendToApp(u,dl||this.download||'',this.type||''))return;}return origClick.apply(this,arguments);};document.addEventListener('click',function(e){var a=e.target&&e.target.closest?e.target.closest('a'):null;if(!a)return;var u=a.getAttribute('href')||a.href||'';var dl=a.getAttribute('download');if(dl!==null||u.indexOf('blob:')===0||u.indexOf('data:')===0){if(sendToApp(u,dl||a.download||'',a.type||'')){e.preventDefault();e.stopPropagation();}}},true);var origOpen=window.open;window.open=function(u){if(typeof u==='string'&&(u.indexOf('blob:')===0||u.indexOf('data:')===0)){if(sendToApp(u,'',''))return null;}return origOpen.apply(this,arguments);};})();"; private void injectSessionAndPrintHooks(WebView view) {
-        String js = "(function(){" +
-                "try{" +
-                "if(window.AndroidSessionBridge){" +
-                "var saved=window.AndroidSessionBridge.getSession();" +
-                "if(saved && saved.length>2){var obj=JSON.parse(saved);for(var k in obj){if(!sessionStorage.getItem(k))sessionStorage.setItem(k,obj[k]);}}" +
-                "if(!window.__edutechHooked){window.__edutechHooked=true;" +
-                "var sync=function(){try{var d={};for(var i=0;i<sessionStorage.length;i++){var k=sessionStorage.key(i);d[k]=sessionStorage.getItem(k);}window.AndroidSessionBridge.saveSession(JSON.stringify(d));}catch(e){}};" +
-                "var origSet=sessionStorage.setItem;sessionStorage.setItem=function(k,v){origSet.apply(this,arguments);sync();};" +
-                "var origRem=sessionStorage.removeItem;sessionStorage.removeItem=function(k){origRem.apply(this,arguments);sync();};" +
-                "window.addEventListener('beforeunload',sync);" +
-                "window.print=function(){if(window.AndroidVaultBridge)window.AndroidVaultBridge.printCurrentPage();};" + "window.__edutechBlobs=window.__edutechBlobs||{};var origCreateObj=URL.createObjectURL;URL.createObjectURL=function(obj){var u=origCreateObj.apply(this,arguments);try{window.__edutechBlobs[u]=obj;}catch(e){}return u;};var origClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){try{var h=this.getAttribute('href')||this.href||'';var dl=this.getAttribute('download')||'';if(h.indexOf('blob:')===0||h.indexOf('data:')===0||this.hasAttribute('download')){var fn=dl||('download_'+Date.now());if(h.indexOf('data:')===0){if(window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(h,fn,'');return;}}else if(h.indexOf('blob:')===0){var blob=window.__edutechBlobs[h];var sendBlob=function(b){var r=new FileReader();r.onloadend=function(){if(r.result&&window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(r.result,fn,b.type||'');}};r.readAsDataURL(b);};if(blob){sendBlob(blob);return;}else{fetch(h).then(function(res){return res.blob();}).then(sendBlob);return;}}}}catch(e){}return origClick.apply(this,arguments);};" + "window.__edutechBlobs=window.__edutechBlobs||{};var origCreateObj=URL.createObjectURL;URL.createObjectURL=function(obj){var u=origCreateObj.apply(this,arguments);try{window.__edutechBlobs[u]=obj;}catch(e){}return u;};var origClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){try{var h=this.getAttribute('href')||this.href||'';var dl=this.getAttribute('download')||'';if(h.indexOf('blob:')===0||h.indexOf('data:')===0||this.hasAttribute('download')){var fn=dl||('download_'+Date.now());if(h.indexOf('data:')===0){if(window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(h,fn,'');return;}}else if(h.indexOf('blob:')===0){var blob=window.__edutechBlobs[h];var sendBlob=function(b){var r=new FileReader();r.onloadend=function(){if(r.result&&window.AndroidSessionBridge&&window.AndroidSessionBridge.saveBase64File){window.AndroidSessionBridge.saveBase64File(r.result,fn,b.type||'');}};r.readAsDataURL(b);};if(blob){sendBlob(blob);return;}else{fetch(h).then(function(res){return res.blob();}).then(sendBlob);return;}}}}catch(e){}return origClick.apply(this,arguments);};" +
-                "}}" +
-                "}catch(e){}" +
-                "})();";
-        view.evaluateJavascript(js + "\n" + 
- SESSION_AND_FILE_BRIDGE_JS, null);
-    }
-
-    private boolean handleUrlNavigation(Uri uri) {
-        if (uri == null) return false;
-        String url = uri.toString();
-        String host = uri.getHost() != null ? uri.getHost().toLowerCase(Locale.ROOT) : "";
-
-        if (url.startsWith("tel:") || url.startsWith("mailto:") || url.startsWith("whatsapp:") || url.startsWith("tg:") || url.startsWith("intent:")) {
-            openExternalApp(uri);
-            return true;
-        }
-
-        List<String> socialHosts = Arrays.asList(
-                "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
-                "facebook.com", "www.facebook.com", "m.facebook.com", "fb.com",
-                "instagram.com", "www.instagram.com",
-                "t.me", "telegram.me",
-                "wa.me", "api.whatsapp.com", "whatsapp.com",
-                "tiktok.com", "www.tiktok.com", "vm.tiktok.com"
-        );
-        for (String sh : socialHosts) {
-            if (host.equals(sh) || host.endsWith("." + sh)) {
-                openExternalApp(uri);
-                return true;
+        webView.setDownloadListener((url, ua, cd, mime, len) -> {
+            if (url != null && url.startsWith("data:")) {
+                saveDataUrlToDevice(url, "edutech_download");
+            } else if (url != null) {
+                downloadUrlToVault(url, "edutech_download");
             }
-        }
-        return false;
+        });
     }
 
-    private void openExternalApp(Uri uri) {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-        } catch (Exception e) {
-            Toast.makeText(this, "لا يوجد تطبيق لفتح الرابط", Toast.LENGTH_SHORT).show();
-        }
-    }
+    private void setupOfflineOverlay() {
+        offlineOverlay = new LinearLayout(this);
+        offlineOverlay.setOrientation(LinearLayout.VERTICAL);
+        offlineOverlay.setGravity(Gravity.CENTER);
+        offlineOverlay.setBackgroundColor(Color.parseColor("#EE0B1120"));
+        offlineOverlay.setPadding(dp(28), dp(28), dp(28), dp(28));
+        offlineOverlay.setVisibility(View.GONE);
 
-    private void setupPopupContainer() {
-        popupContainer = new FrameLayout(this);
-        popupContainer.setBackgroundColor(Color.WHITE);
-        popupContainer.setVisibility(View.GONE);
-        rootLayout.addView(popupContainer, new FrameLayout.LayoutParams(
+        TextView title = new TextView(this);
+        title.setText("📡 لا يوجد اتصال بالإنترنت");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(20f);
+        title.setGravity(Gravity.CENTER);
+        offlineOverlay.addView(title);
+
+        TextView sub = new TextView(this);
+        sub.setText("يمكنك إعادة المحاولة أو تصفح ملفاتك المحفوظة في مكتبتي دون إنترنت.");
+        sub.setTextColor(Color.parseColor("#94A3B8"));
+        sub.setTextSize(14f);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(10), 0, dp(22));
+        offlineOverlay.addView(sub);
+
+        Button retryBtn = new Button(this);
+        retryBtn.setText("🔄 إعادة المحاولة");
+        retryBtn.setOnClickListener(v -> {
+            if (isNetworkAvailable()) {
+                offlineOverlay.setVisibility(View.GONE);
+                webView.reload();
+            } else {
+                Toast.makeText(this, "ما زال الاتصال غير متاح", Toast.LENGTH_SHORT).show();
+            }
+        });
+        offlineOverlay.addView(retryBtn);
+
+        Button libBtn = new Button(this);
+        libBtn.setText("📚 فتح مكتبتي");
+        libBtn.setOnClickListener(v -> showLocalLibraryDialog());
+        offlineOverlay.addView(libBtn);
+
+        rootLayout.addView(offlineOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
-    private void closePopupWebView() {
-        if (popupWebView != null) {
-            popupWebView.destroy();
-            popupWebView = null;
-        }
-        popupContainer.removeAllViews();
-        popupContainer.setVisibility(View.GONE);
-    }
-
-    private void setupBottomActionBar() {
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setBackgroundColor(Color.parseColor("#0F172A"));
-        bar.setGravity(Gravity.CENTER);
-        bar.setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6));
-
-        FrameLayout.LayoutParams barLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(52));
-        barLp.gravity = Gravity.BOTTOM;
-
-        Button btnLibrary = createBarButton("📚 مكتبتي", "#1E3A8A");
-        btnLibrary.setOnClickListener(v -> {
-            triggerHaptic(v);
-            showLocalLibraryDialog();
-        });
-
-        Button btnVoice = createBarButton("🎙️ تحدث", "#047857");
-        btnVoice.setOnClickListener(v -> {
-            triggerHaptic(v);
-            startVoiceRecognition();
-        });
-
-        Button btnOverlay = createBarButton("🤖 عائم", "#6D28D9");
-        btnOverlay.setOnClickListener(v -> {
-            triggerHaptic(v);
-            toggleOverlayAssistant();
-        });
-
-        bar.addView(btnLibrary);
-        bar.addView(btnVoice);
-        bar.addView(btnOverlay);
-        Button btnBack = createBarButton("⬅", "#334155"); btnBack.setOnClickListener(v -> { triggerHaptic(v); if (webView.canGoBack()) webView.goBack(); }); Button btnHome = createBarButton("🏠", "#0284C7"); btnHome.setOnClickListener(v -> { triggerHaptic(v); webView.loadUrl(HOME_URL); }); Button btnReload = createBarButton("🔄", "#475569"); btnReload.setOnClickListener(v -> { triggerHaptic(v); webView.reload(); }); bar.addView(btnBack, 0); bar.addView(btnHome, 1); bar.addView(btnReload); bottomControlBar = bar; audioPlayerBar = new LinearLayout(this); audioPlayerBar.setOrientation(LinearLayout.HORIZONTAL); audioPlayerBar.setBackgroundColor(Color.parseColor("#1E293B")); audioPlayerBar.setVisibility(View.GONE); mainColumn.addView(audioPlayerBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)); mainColumn.addView(bottomControlBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-    }
-
-    private Button createBarButton(String text, String hexColor) {
-        Button btn = new Button(this);
-        btn.setText(text);
-        btn.setTextColor(Color.WHITE);
-        btn.setTextSize(13f);
-        btn.setAllCaps(false);
+    private void setupDraggableAssistantButton() {
+        assistButton = new FrameLayout(this);
+        int size = dp(44);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(hexColor));
-        bg.setCornerRadius(dpToPx(18));
-        btn.setBackground(bg);
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(Color.parseColor("#0F172A"));
+        bg.setStroke(dp(2), Color.parseColor("#38BDF8"));
+        assistButton.setBackground(bg);
+        assistButton.setPadding(dp(2), dp(2), dp(2), dp(2));
+        assistButton.setElevation(dp(8));
 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-        lp.setMargins(dpToPx(4), 0, dpToPx(4), 0);
-        btn.setLayoutParams(lp);
-        return btn;
-    }
+        ImageView img = new ImageView(this);
+        img.setImageResource(R.mipmap.ic_launcher);
+        img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        assistButton.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-    private void setupIntroMotionGraphics() {
-        splashView = new IntroSplashView(this);
-        rootLayout.addView(splashView, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)); android.widget.ImageView logoImg = new android.widget.ImageView(this); logoImg.setTag("splashLogo"); logoImg.setImageResource(R.mipmap.ic_launcher); rootLayout.addView(logoImg, new FrameLayout.LayoutParams(240, 240, android.view.Gravity.CENTER)); ObjectAnimator pulseAnim = ObjectAnimator.ofPropertyValuesHolder(logoImg, PropertyValuesHolder.ofFloat(View.SCALE_X, 0.92f, 1.08f), PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.92f, 1.08f)); pulseAnim.setDuration(900); pulseAnim.setRepeatCount(ValueAnimator.INFINITE); pulseAnim.setRepeatMode(ValueAnimator.REVERSE); pulseAnim.start();
-        splashView.setOnClickListener(v -> {
-            triggerHaptic(v);
-            dismissSplash();
-        });
-        mainHandler.postDelayed(this::dismissSplash, 2300);
-    }
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
+        lp.gravity = Gravity.TOP | Gravity.START;
+        lp.leftMargin = dp(12);
+        lp.topMargin = dp(180);
+        rootLayout.addView(assistButton, lp);
 
-    private void dismissSplash() { View logo = rootLayout.findViewWithTag("splashLogo"); if (logo != null && logo.getParent() != null) { logo.animate().alpha(0f).setDuration(450).withEndAction(() -> { if (logo.getParent() != null) rootLayout.removeView(logo); }).start(); }
-        if (splashView != null && splashView.getParent() != null) {
-            splashView.animate().alpha(0f).setDuration(450).withEndAction(() -> {
-                if (splashView.getParent() != null) {
-                    rootLayout.removeView(splashView);
-                }
-                splashView.stopAnimation();
-            }).start();
-        }
-    }
-
-    private void triggerHaptic(View v) {
-        if (v != null) {
-            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-        }
-        Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-        if (vibrator != null && vibrator.hasVibrator()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator.vibrate(VibrationEffect.createOneShot(25, VibrationEffect.DEFAULT_AMPLITUDE));
-            } else {
-                vibrator.vibrate(25);
+        final float[] d = new float[4];
+        assistButton.setOnTouchListener((v, e) -> {
+            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    d[0] = e.getRawX() - p.leftMargin;
+                    d[1] = e.getRawY() - p.topMargin;
+                    d[2] = e.getRawX();
+                    d[3] = e.getRawY();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    int maxX = Math.max(0, rootLayout.getWidth() - size);
+                    int maxY = Math.max(0, rootLayout.getHeight() - size);
+                    p.leftMargin = Math.max(0, Math.min(maxX, (int) (e.getRawX() - d[0])));
+                    p.topMargin = Math.max(0, Math.min(maxY, (int) (e.getRawY() - d[1])));
+                    v.setLayoutParams(p);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (Math.hypot(e.getRawX() - d[2], e.getRawY() - d[3]) < dp(8)) {
+                        showQuickAssistantMenu();
+                    } else {
+                        int mid = rootLayout.getWidth() / 2;
+                        p.leftMargin = (p.leftMargin + size / 2 < mid) ? dp(8) : Math.max(0, rootLayout.getWidth() - size - dp(8));
+                        v.setLayoutParams(p);
+                    }
+                    return true;
             }
-        }
+            return false;
+        });
     }
 
-    private void startVoiceRecognition() {
-        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-SA");
-        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "تحدث الآن مع المساعد التعليمي...");
+    private void showQuickAssistantMenu() {
+        List<String> items = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        items.add("🤖 فتح المساعد الذكي (واجهة الموقع)");
+        actions.add(() -> webView.evaluateJavascript("try{var b=document.querySelector('[data-assistant],.ai-btn,#ai-btn');if(b)b.click();}catch(e){}", null));
+        items.add("🎙️ تحدث صوتياً");
+        actions.add(this::startVoiceInput);
+        items.add("📚 مكتبتي (PDF • صوت • فيديو)");
+        actions.add(this::showLocalLibraryDialog);
+        if (!Settings.canDrawOverlays(this)) {
+            items.add("🤖 تفعيل الظهور فوق التطبيقات");
+            actions.add(() -> startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())), REQ_OVERLAY));
+        }
+        items.add("📤 مشاركة رابط المنصة");
+        actions.add(() -> {
+            Intent sh = new Intent(Intent.ACTION_SEND);
+            sh.setType("text/plain");
+            sh.putExtra(Intent.EXTRA_TEXT, HOME_URL);
+            startActivity(Intent.createChooser(sh, "مشاركة رابط المنصة"));
+        });
+        items.add("⚡ تسريع وتنظيف الكاش");
+        actions.add(() -> {
+            webView.clearCache(true);
+            Toast.makeText(this, "تم تنظيف الكاش وتسريع التطبيق", Toast.LENGTH_SHORT).show();
+        });
+        items.add("🔄 تحديث الصفحة");
+        actions.add(() -> webView.reload());
+
+        new AlertDialog.Builder(this)
+                .setTitle("⚡ القائمة السريعة")
+                .setItems(items.toArray(new String[0]), (d, which) -> actions.get(which).run())
+                .show();
+    }
+
+    private void startVoiceInput() {
         try {
-            startActivityForResult(intent, REQ_VOICE_INPUT);
+            Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG");
+            startActivityForResult(i, REQ_VOICE);
         } catch (Exception e) {
-            Toast.makeText(this, "التعرف الصوتي غير مدعوم على هذا الجهاز", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "الإدخال الصوتي غير مدعوم على هذا الجهاز", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void toggleOverlayAssistant() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            startActivityForResult(intent, REQ_OVERLAY_PERMISSION);
-            Toast.makeText(this, "يرجى تفعيل صلاحية الظهور فوق التطبيقات", Toast.LENGTH_LONG).show();
-            return;
+    private void setupIntroSplash() {
+        splashOverlay = new FrameLayout(this);
+        splashOverlay.setBackgroundColor(Color.parseColor("#0B1120"));
+        splashOverlay.setClickable(true);
+
+        MotionParticlesView particles = new MotionParticlesView(this);
+        splashOverlay.addView(particles, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout center = new LinearLayout(this);
+        center.setOrientation(LinearLayout.VERTICAL);
+        center.setGravity(Gravity.CENTER);
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.mipmap.ic_launcher);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(110), dp(110));
+        center.addView(logo, logoLp);
+
+        ObjectAnimator pulse = ObjectAnimator.ofPropertyValuesHolder(logo,
+                PropertyValuesHolder.ofFloat(View.SCALE_X, 0.85f, 1.08f, 1.0f),
+                PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.85f, 1.08f, 1.0f));
+        pulse.setDuration(1400);
+        pulse.setRepeatCount(ObjectAnimator.INFINITE);
+        pulse.setRepeatMode(ObjectAnimator.REVERSE);
+        pulse.start();
+
+        TextView appTitle = new TextView(this);
+        appTitle.setText("EduTech Mindset");
+        appTitle.setTextColor(Color.WHITE);
+        appTitle.setTextSize(24f);
+        appTitle.setPadding(0, dp(18), 0, dp(24));
+        center.addView(appTitle);
+
+        Button enterBtn = new Button(this);
+        enterBtn.setText("🚀 ادخل التطبيق");
+        enterBtn.setVisibility(View.INVISIBLE);
+        enterBtn.setAlpha(0f);
+        enterBtn.setOnClickListener(v -> dismissSplash());
+        center.addView(enterBtn);
+
+        splashOverlay.addView(center, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        rootLayout.addView(splashOverlay);
+
+        try {
+            int rawId = getResources().getIdentifier("intro_voice", "raw", getPackageName());
+            if (rawId != 0) {
+                introVoicePlayer = MediaPlayer.create(this, rawId);
+                if (introVoicePlayer != null) introVoicePlayer.start();
+            }
+        } catch (Exception ignored) {}
+
+        mainHandler.postDelayed(() -> {
+            if (!splashDismissed) {
+                enterBtn.setVisibility(View.VISIBLE);
+                enterBtn.animate().alpha(1f).scaleX(1.05f).scaleY(1.05f).setDuration(500).start();
+            }
+        }, 10000);
+
+        mainHandler.postDelayed(this::dismissSplash, 15000);
+    }
+
+    private void dismissSplash() {
+        if (splashDismissed) return;
+        splashDismissed = true;
+        try {
+            if (introVoicePlayer != null) {
+                introVoicePlayer.release();
+                introVoicePlayer = null;
+            }
+        } catch (Exception ignored) {}
+        if (splashOverlay != null) {
+            splashOverlay.animate().alpha(0f).setDuration(350).withEndAction(() -> splashOverlay.setVisibility(View.GONE)).start();
         }
-        Intent serviceIntent = new Intent(this, OverlayAssistantService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
-        } else {
-            startService(serviceIntent);
-        }
-        Toast.makeText(this, "تم تفعيل 🤖 مساعدي العائم", Toast.LENGTH_SHORT).show();
+    }
+    private File getVaultDir() {
+        File dir = new File(getFilesDir(), "EduTechVault");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    private void saveDataUrlToDevice(String dataUrl, String rawName) {
+        new Thread(() -> {
+            try {
+                int comma = dataUrl.indexOf(',');
+                if (comma < 0) return;
+                String meta = dataUrl.substring(0, comma);
+                byte[] bytes = Base64.decode(dataUrl.substring(comma + 1), Base64.DEFAULT);
+                String ext = ".bin";
+                if (meta.contains("pdf")) ext = ".pdf";
+                else if (meta.contains("mpeg") || meta.contains("mp3")) ext = ".mp3";
+                else if (meta.contains("wav")) ext = ".wav";
+                else if (meta.contains("mp4")) ext = ".mp4";
+                else if (meta.contains("png")) ext = ".png";
+                else if (meta.contains("jpeg") || meta.contains("jpg")) ext = ".jpg";
+                String safeName = rawName.replaceAll("[^a-zA-Z0-9._-]", "_");
+                if (!safeName.contains(".")) safeName += "_" + System.currentTimeMillis() + ext;
+
+                File vaultFile = new File(getVaultDir(), safeName);
+                try (FileOutputStream fos = new FileOutputStream(vaultFile)) { fos.write(bytes); }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContentValues cv = new ContentValues();
+                    cv.put(MediaStore.Downloads.DISPLAY_NAME, safeName);
+                    cv.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/EduTechMindset");
+                    Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                    if (uri != null) {
+                        try (OutputStream os = getContentResolver().openOutputStream(uri)) {
+                            if (os != null) os.write(bytes);
+                        }
+                    }
+                } else {
+                    File dlDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "EduTechMindset");
+                    if (!dlDir.exists()) dlDir.mkdirs();
+                    try (FileOutputStream fos = new FileOutputStream(new File(dlDir, safeName))) { fos.write(bytes); }
+                }
+                runOnUiThread(() -> Toast.makeText(this, "تم الحفظ في مكتبتي و Downloads/EduTechMindset", Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "تعذر الحفظ: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void downloadUrlToVault(String urlStr, String rawName) {
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
+                c.connect();
+                String ext = urlStr.contains(".pdf") ? ".pdf" : (urlStr.contains(".mp3") ? ".mp3" : (urlStr.contains(".mp4") ? ".mp4" : ".bin"));
+                File out = new File(getVaultDir(), rawName + "_" + System.currentTimeMillis() + ext);
+                try (InputStream is = c.getInputStream(); FileOutputStream fos = new FileOutputStream(out)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = is.read(buf)) > 0) fos.write(buf, 0, n);
+                }
+                runOnUiThread(() -> Toast.makeText(this, "تم تنزيل الملف إلى مكتبتي", Toast.LENGTH_SHORT).show());
+            } catch (Exception ignored) {}
+        }).start();
     }
 
     private void showLocalLibraryDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        LinearLayout container = new LinearLayout(this);
-        container.setOrientation(LinearLayout.VERTICAL);
-        container.setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16));
-        container.setBackgroundColor(Color.parseColor("#0F172A"));
+        Dialog dlg = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.parseColor("#0B1120"));
+        root.setPadding(dp(14), dp(14), dp(14), dp(14));
 
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
         TextView title = new TextView(this);
-        title.setText("📚 مكتبتي المحلية (EduTech Vault)");
+        title.setText("📚 مكتبتي");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(18f);
-        title.setTypeface(null, Typeface.BOLD);
-        container.addView(title);
+        title.setTextSize(20f);
+        title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        top.addView(title);
+        Button close = new Button(this);
+        close.setText("✕");
+        close.setOnClickListener(v -> dlg.dismiss());
+        top.addView(close);
+        root.addView(top);
 
-        Button btnImport = createBarButton("➕ استيراد ملف (PDF / صوت)", "#2563EB");
-        LinearLayout.LayoutParams importLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(44));
-        importLp.topMargin = dpToPx(12);
-        importLp.bottomMargin = dpToPx(12);
-        btnImport.setLayoutParams(importLp);
-        container.addView(btnImport);
+        EditText search = new EditText(this);
+        search.setHint("🔍 بحث فوري...");
+        search.setTextColor(Color.WHITE);
+        search.setHintTextColor(Color.GRAY);
+        root.addView(search);
 
-        ScrollView scrollView = new ScrollView(this);
-        LinearLayout listLayout = new LinearLayout(this);
-        listLayout.setOrientation(LinearLayout.VERTICAL);
-        scrollView.addView(listLayout);
-        container.addView(scrollView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(300)));
+        LinearLayout tabs = new LinearLayout(this);
+        final String[] filterType = {"ALL"};
+        String[] tabLabels = {"الكل", "PDF", "صوت", "فيديو"};
+        String[] tabVals = {"ALL", "PDF", "AUDIO", "VIDEO"};
 
-        builder.setView(container);
-        AlertDialog dialog = builder.create();
+        ScrollView sv = new ScrollView(this);
+        LinearLayout listBox = new LinearLayout(this);
+        listBox.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(listBox);
 
-        btnImport.setOnClickListener(v -> {
-            triggerHaptic(v);
-            dialog.dismiss();
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("*/*");
-            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf", "audio/*"});
-            startActivityForResult(intent, REQ_IMPORT_VAULT);
-        });
-
-        File[] files = vaultDir.listFiles();
-        if (files == null || files.length == 0) {
-            TextView empty = new TextView(this);
-            empty.setText("لا توجد ملفات محفوظة حالياً. استورد ملف PDF أو كتاباً صوتياً للبدء.");
-            empty.setTextColor(Color.parseColor("#94A3B8"));
-            empty.setPadding(0, dpToPx(16), 0, dpToPx(16));
-            listLayout.addView(empty);
-        } else {
-            for (File f : files) {
-                Button itemBtn = createBarButton("📄 " + f.getName(), "#1E293B");
-                LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(44));
-                itemLp.bottomMargin = dpToPx(8);
-                itemBtn.setLayoutParams(itemLp);
-                itemBtn.setOnClickListener(v -> {
-                    triggerHaptic(v);
-                    dialog.dismiss();
-                    openVaultFile(f);
-                });
-                LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); rLp.bottomMargin = dpToPx(8); row.setLayoutParams(rLp); itemBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dpToPx(44), 1f)); row.addView(itemBtn); Button pubBtn = createBarButton("📤 للمنصة", "#0EA5E9"); LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(44)); pLp.leftMargin = dpToPx(6); pubBtn.setLayoutParams(pLp); pubBtn.setOnClickListener(v -> { triggerHaptic(v); dialog.dismiss(); publishFileToWebApp(f); }); row.addView(pubBtn); listLayout.addView(row);
+        Runnable refreshList = () -> {
+            listBox.removeAllViews();
+            File[] files = getVaultDir().listFiles();
+            if (files == null || files.length == 0) {
+                TextView empty = new TextView(this);
+                empty.setText("لا توجد ملفات محفوظة بعد.");
+                empty.setTextColor(Color.LTGRAY);
+                empty.setPadding(dp(10), dp(20), dp(10), dp(20));
+                listBox.addView(empty);
+                return;
             }
+            Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            String q = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            for (File f : files) {
+                String n = f.getName().toLowerCase(Locale.ROOT);
+                if (!q.isEmpty() && !n.contains(q)) continue;
+                boolean isPdf = n.endsWith(".pdf");
+                boolean isAudio = n.endsWith(".mp3") || n.endsWith(".wav") || n.endsWith(".m4a");
+                boolean isVideo = n.endsWith(".mp4") || n.endsWith(".webm");
+                if ("PDF".equals(filterType[0]) && !isPdf) continue;
+                if ("AUDIO".equals(filterType[0]) && !isAudio) continue;
+                if ("VIDEO".equals(filterType[0]) && !isVideo) continue;
+
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.VERTICAL);
+                row.setBackgroundColor(Color.parseColor("#1E293B"));
+                row.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rlp.bottomMargin = dp(8);
+                row.setLayoutParams(rlp);
+
+                TextView nameTv = new TextView(this);
+                nameTv.setText((isPdf ? "📄 " : (isAudio ? "🎵 " : (isVideo ? "🎬 " : "📁 "))) + f.getName());
+                nameTv.setTextColor(Color.WHITE);
+                nameTv.setTextSize(15f);
+                nameTv.setOnClickListener(v -> {
+                    if (isPdf) openPdfViewer(f);
+                    else if (isAudio) openAudioPlayer(f);
+                    else if (isVideo) openVideoPlayer(f);
+                    else shareVaultFile(f);
+                });
+                row.addView(nameTv);
+
+                LinearLayout acts = new LinearLayout(this);
+                Button bRen = new Button(this); bRen.setText("إعادة تسمية");
+                bRen.setOnClickListener(v -> {
+                    EditText et = new EditText(this);
+                    et.setText(f.getName());
+                    new AlertDialog.Builder(this).setTitle("إعادة تسمية").setView(et)
+                            .setPositiveButton("حفظ", (d1, w) -> {
+                                File nf = new File(f.getParentFile(), et.getText().toString().trim());
+                                if (f.renameTo(nf)) listBox.post(() -> {});
+                                dlg.dismiss(); showLocalLibraryDialog();
+                            }).setNegativeButton("إلغاء", null).show();
+                });
+                Button bShare = new Button(this); bShare.setText("مشاركة");
+                bShare.setOnClickListener(v -> shareVaultFile(f));
+                Button bPub = new Button(this); bPub.setText("نشر للمنصة");
+                bPub.setOnClickListener(v -> {
+                    dlg.dismiss();
+                    Toast.makeText(this, "يمكنك اختيار الملف الآن للرفع على المنصة", Toast.LENGTH_SHORT).show();
+                });
+                acts.addView(bRen); acts.addView(bShare); acts.addView(bPub);
+                row.addView(acts);
+                listBox.addView(row);
+            }
+        };
+
+        for (int i = 0; i < tabLabels.length; i++) {
+            final int idx = i;
+            Button tb = new Button(this);
+            tb.setText(tabLabels[i]);
+            tb.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            tb.setOnClickListener(v -> { filterType[0] = tabVals[idx]; refreshList.run(); });
+            tabs.addView(tb);
         }
-        dialog.show();  
-    }
-    private void publishFileToWebApp(File file) { new Thread(() -> { try { java.io.FileInputStream fis = new java.io.FileInputStream(file); java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(); byte[] buf = new byte[8192]; int len; while ((len = fis.read(buf)) != -1) bos.write(buf, 0, len); fis.close(); String b64 = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP); String name = file.getName(); String lower = name.toLowerCase(Locale.ROOT); String mime = lower.endsWith(".pdf") ? "application/pdf" : (lower.endsWith(".mp3") ? "audio/mpeg" : (lower.endsWith(".png") ? "image/png" : (lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : "application/octet-stream"))); String js = "(function(){try{var b64='" + b64 + "',name=" + org.json.JSONObject.quote(name) + ",mime='" + mime + "';var bin=atob(b64),arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);var f=new File([arr],name,{type:mime});var inp=document.querySelector('input[type=\"file\"]');if(inp){var dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;inp.dispatchEvent(new Event('change',{bubbles:true}));}window.dispatchEvent(new CustomEvent('edutech-local-file',{detail:{name:name,mime:mime,base64:b64,file:f}}));}catch(e){console.error(e);}})();"; mainHandler.post(() -> { if (webView != null) webView.evaluateJavascript(js, null); }); } catch (Exception ignored) {} }).start(); }
-    
+        root.addView(tabs);
+        root.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-    private void openVaultFile(File file) {
-        String lower = file.getName().toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".pdf")) {
-            openBuiltInPdfViewer(file);
-        } else if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".wav") || lower.endsWith(".ogg")) {
-            openBuiltInAudioPlayer(file);
-        } else {
-            Toast.makeText(this, "تم حفظ الملف في: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
+        search.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) { refreshList.run(); }
+            public void afterTextChanged(Editable s) {}
+        });
+        refreshList.run();
+        dlg.setContentView(root);
+        dlg.show();
+    }
+
+    private void shareVaultFile(File f) {
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", f);
+            Intent i = new Intent(Intent.ACTION_SEND);
+            i.setType("*/*");
+            i.putExtra(Intent.EXTRA_STREAM, uri);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(i, "مشاركة الملف"));
+        } catch (Exception e) {
+            Toast.makeText(this, "تعذر مشاركة الملف", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void openBuiltInPdfViewer(File pdfFile) {
-        Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setBackgroundColor(Color.parseColor("#0F172A"));
+    private void openPdfViewer(File file) {
+        Dialog dlg = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        Window w = dlg.getWindow();
+        if (w != null) w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        final int[] pageIdx = {sp.getInt("pdf_page_" + file.getName(), 0)};
+        final boolean[] night = {false};
 
-        LinearLayout topBar = new LinearLayout(this);
-        topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
-        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.BLACK);
 
-        Button btnPrev = createBarButton("السابق", "#1E3A8A");
-        Button btnNext = createBarButton("التالي", "#1E3A8A");
-        Button btnClose = createBarButton("إغلاق", "#DC2626");
-        TextView pageInfo = new TextView(this);
-        pageInfo.setTextColor(Color.WHITE);
-        pageInfo.setGravity(Gravity.CENTER);
-        pageInfo.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        topBar.addView(btnPrev);
-        topBar.addView(pageInfo);
-        topBar.addView(btnNext);
-        topBar.addView(btnClose);
-        layout.addView(topBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(52)));
-
-        ImageView imageView = new ImageView(this);
-        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        layout.addView(imageView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        LinearLayout bar = new LinearLayout(this);
+        TextView info = new TextView(this);
+        info.setTextColor(Color.WHITE);
+        ImageView img = new ImageView(this);
+        img.setScaleType(ImageView.ScaleType.FIT_CENTER);
 
         try {
-            ParcelFileDescriptor pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
+            ParcelFileDescriptor pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
             PdfRenderer renderer = new PdfRenderer(pfd);
-            final int[] currentIndex = {0};
-            final int totalPages = renderer.getPageCount();
-
+            int total = renderer.getPageCount();
             Runnable renderPage = () -> {
-                if (totalPages <= 0) return;
-                PdfRenderer.Page page = renderer.openPage(currentIndex[0]);
+                if (pageIdx[0] < 0) pageIdx[0] = 0;
+                if (pageIdx[0] >= total) pageIdx[0] = Math.max(0, total - 1);
+                sp.edit().putInt("pdf_page_" + file.getName(), pageIdx[0]).apply();
+                PdfRenderer.Page page = renderer.openPage(pageIdx[0]);
                 Bitmap bmp = Bitmap.createBitmap(page.getWidth() * 2, page.getHeight() * 2, Bitmap.Config.ARGB_8888);
                 bmp.eraseColor(Color.WHITE);
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
                 page.close();
-                imageView.setImageBitmap(bmp);
-                pageInfo.setText((currentIndex[0] + 1) + " / " + totalPages);
+                img.setImageBitmap(bmp);
+                if (night[0]) {
+                    ColorMatrix cm = new ColorMatrix(new float[]{
+                            -1,0,0,0,255, 0,-1,0,0,255, 0,0,-1,0,255, 0,0,0,1,0 });
+                    img.setColorFilter(new ColorMatrixColorFilter(cm));
+                } else {
+                    img.clearColorFilter();
+                }
+                info.setText((pageIdx[0] + 1) + "/" + total);
             };
+            Button prev = new Button(this); prev.setText("◀"); prev.setOnClickListener(v -> { pageIdx[0]--; renderPage.run(); });
+            Button next = new Button(this); next.setText("▶"); next.setOnClickListener(v -> { pageIdx[0]++; renderPage.run(); });
+            Button nightBtn = new Button(this); nightBtn.setText("🌙"); nightBtn.setOnClickListener(v -> { night[0] = !night[0]; renderPage.run(); });
+            Button jumpBtn = new Button(this); jumpBtn.setText("انتقال");
+            jumpBtn.setOnClickListener(v -> {
+                EditText et = new EditText(this);
+                et.setInputType(InputType.TYPE_CLASS_NUMBER);
+                new AlertDialog.Builder(this).setTitle("القفز لصفحة (1-" + total + ")").setView(et)
+                        .setPositiveButton("انتقال", (d, x) -> {
+                            try { pageIdx[0] = Integer.parseInt(et.getText().toString()) - 1; renderPage.run(); } catch (Exception ignored) {}
+                        }).show();
+            });
+            Button noteBtn = new Button(this); noteBtn.setText("📝");
+            noteBtn.setOnClickListener(v -> {
+                EditText et = new EditText(this);
+                et.setText(sp.getString("pdf_note_" + file.getName(), ""));
+                new AlertDialog.Builder(this).setTitle("ملاحظة على الملف").setView(et)
+                        .setPositiveButton("حفظ", (d, x) -> sp.edit().putString("pdf_note_" + file.getName(), et.getText().toString()).apply()).show();
+            });
+            Button closeBtn = new Button(this); closeBtn.setText("✕");
+            closeBtn.setOnClickListener(v -> { try { renderer.close(); pfd.close(); } catch (Exception ignored) {} dlg.dismiss(); });
 
-            btnPrev.setOnClickListener(v -> {
-                triggerHaptic(v);
-                if (currentIndex[0] > 0) {
-                    currentIndex[0]--;
-                    renderPage.run();
-                }
-            });
-            btnNext.setOnClickListener(v -> {
-                triggerHaptic(v);
-                if (currentIndex[0] < totalPages - 1) {
-                    currentIndex[0]++;
-                    renderPage.run();
-                }
-            });
-            btnClose.setOnClickListener(v -> {
-                triggerHaptic(v);
-                try {
-                    renderer.close();
-                    pfd.close();
-                } catch (Exception ignored) {}
-                dialog.dismiss();
-            });
-            dialog.setOnDismissListener(d -> {
-                try {
-                    renderer.close();
-                    pfd.close();
-                } catch (Exception ignored) {}
-            });
-
+            bar.addView(prev); bar.addView(info); bar.addView(next); bar.addView(nightBtn); bar.addView(jumpBtn); bar.addView(noteBtn); bar.addView(closeBtn);
+            root.addView(bar);
+            root.addView(img, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
             renderPage.run();
-            dialog.setContentView(layout);
-            dialog.show();
+            dlg.setContentView(root);
+            dlg.show();
         } catch (Exception e) {
             Toast.makeText(this, "تعذر فتح ملف PDF", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void openBuiltInAudioPlayer(File audioFile) {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(dpToPx(20), dpToPx(20), dpToPx(20), dpToPx(20));
-        layout.setBackgroundColor(Color.parseColor("#0F172A"));
-
-        TextView title = new TextView(this);
-        title.setText("🎧 " + audioFile.getName());
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(16f);
-        layout.addView(title);
-
-        SeekBar seekBar = new SeekBar(this);
-        LinearLayout.LayoutParams seekLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        seekLp.topMargin = dpToPx(16);
-        seekLp.bottomMargin = dpToPx(16);
-        layout.addView(seekBar, seekLp);
-
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        Button btnPlayPause = createBarButton("⏸️ إيقاف مؤقت", "#047857");
-        Button btnSpeed = createBarButton("السرعة: 1.0x", "#1D4ED8");
-        controls.addView(btnPlayPause);
-        controls.addView(btnSpeed);
-        layout.addView(controls, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(46)));
-
+    private void openAudioPlayer(File file) {
+        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         MediaPlayer mp = new MediaPlayer();
-        final float[] speeds = {1.0f, 1.25f, 1.5f};
-        final int[] speedIdx = {0};
-
         try {
-            mp.setDataSource(audioFile.getAbsolutePath());
+            mp.setAudioAttributes(new AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
+            mp.setDataSource(file.getAbsolutePath());
             mp.prepare();
-            seekBar.setMax(mp.getDuration());
+            int pos = sp.getInt("audio_pos_" + file.getName(), 0);
+            if (pos > 0 && pos < mp.getDuration()) mp.seekTo(pos);
             mp.start();
         } catch (Exception e) {
-            Toast.makeText(this, "تعذر تشغيل الملف الصوتي", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "تعذر تشغيل الصوت", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        Runnable updateSeek = new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (mp.isPlaying()) {
-                        seekBar.setProgress(mp.getCurrentPosition());
-                        mainHandler.postDelayed(this, 400);
-                    }
-                } catch (Exception ignored) {}
-            }
-        };
-        mainHandler.post(updateSeek);
-
-        btnPlayPause.setOnClickListener(v -> {
-            triggerHaptic(v);
-            if (mp.isPlaying()) {
-                mp.pause();
-                btnPlayPause.setText("▶️ تشغيل");
-            } else {
-                mp.start();
-                btnPlayPause.setText("⏸️ إيقاف مؤقت");
-                mainHandler.post(updateSeek);
-            }
-        });
-
-        btnSpeed.setOnClickListener(v -> {
-            triggerHaptic(v);
-            speedIdx[0] = (speedIdx[0] + 1) % speeds.length;
-            float s = speeds[speedIdx[0]];
-            btnSpeed.setText("السرعة: " + s + "x");
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(16), dp(16), dp(16));
+        final float[] spd = {1.0f};
+        Button toggle = new Button(this); toggle.setText("⏸️ إيقاف / تشغيل");
+        toggle.setOnClickListener(v -> { if (mp.isPlaying()) mp.pause(); else mp.start(); });
+        Button speedBtn = new Button(this); speedBtn.setText("السرعة: 1.0x");
+        speedBtn.setOnClickListener(v -> {
+            spd[0] = spd[0] == 1.0f ? 1.25f : (spd[0] == 1.25f ? 1.5f : 1.0f);
+            speedBtn.setText("السرعة: " + spd[0] + "x");
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                try {
-                    PlaybackParams params = mp.getPlaybackParams();
-                    params.setSpeed(s);
-                    mp.setPlaybackParams(params);
-                } catch (Exception ignored) {}
+                PlaybackParams pp = mp.getPlaybackParams();
+                pp.setSpeed(spd[0]);
+                mp.setPlaybackParams(pp);
             }
         });
+        Button t15 = new Button(this); t15.setText("⏱️ مؤقت 15 دقيقة");
+        t15.setOnClickListener(v -> { mainHandler.postDelayed(() -> { if (mp.isPlaying()) mp.pause(); }, 15 * 60 * 1000L); Toast.makeText(this, "تم ضبط مؤقت 15د", Toast.LENGTH_SHORT).show(); });
+        Button t30 = new Button(this); t30.setText("⏱️ مؤقت 30 دقيقة");
+        t30.setOnClickListener(v -> { mainHandler.postDelayed(() -> { if (mp.isPlaying()) mp.pause(); }, 30 * 60 * 1000L); Toast.makeText(this, "تم ضبط مؤقت 30د", Toast.LENGTH_SHORT).show(); });
+        box.addView(toggle); box.addView(speedBtn); box.addView(t15); box.addView(t30);
 
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                if (fromUser) mp.seekTo(progress);
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setView(layout)
-                .setPositiveButton("إغلاق", (d, w) -> d.dismiss())
-                .create();
-        dialog.setOnDismissListener(d -> {
-            mainHandler.removeCallbacks(updateSeek);
-            try {
-                if (mp.isPlaying()) mp.stop();
-                mp.release();
-            } catch (Exception ignored) {}
-        });
-        dialog.show();
+        new AlertDialog.Builder(this).setTitle("🎵 " + file.getName()).setView(box)
+                .setOnDismissListener(d -> {
+                    try { sp.edit().putInt("audio_pos_" + file.getName(), mp.getCurrentPosition()).apply(); mp.release(); } catch (Exception ignored) {}
+                }).setPositiveButton("إغلاق", null).show();
     }
 
-    private void saveDataUrlToDevice(String dataUrl, String fileName, String mimeType) {
-        try {
-            int comma = dataUrl.indexOf(',');
-            if (comma < 0) return;
-            String base64 = dataUrl.substring(comma + 1);
-            byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
-            saveBytesToVaultAndDownloads(bytes, fileName, mimeType);
-        } catch (Exception e) {
-            runOnUiThread(() -> Toast.makeText(this, "فشل حفظ الملف", Toast.LENGTH_SHORT).show());
-        }
-    }
-
-    private void downloadHttpFileToDevice(String urlStr, String fileName, String mimeType) {
-        new Thread(() -> {
-            try {
-                HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
-                String cookies = CookieManager.getInstance().getCookie(urlStr);
-                if (cookies != null) conn.setRequestProperty("Cookie", cookies);
-                conn.connect();
-                InputStream in = conn.getInputStream();
-                ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                byte[] buf = new byte[8192];
-                int len;
-                while ((len = in.read(buf)) != -1) {
-                    bos.write(buf, 0, len);
-                }
-                in.close();
-                saveBytesToVaultAndDownloads(bos.toByteArray(), fileName, mimeType);
-            } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "فشل تنزيل الملف", Toast.LENGTH_SHORT).show());
-            }
-        }).start();
-    }
-
-    private void saveBytesToVaultAndDownloads(byte[] data, String fileName, String mimeType) {
-        try {
-            if (fileName == null || fileName.trim().isEmpty()) {
-                fileName = "EduTech_" + System.currentTimeMillis() + ".pdf";
-            }
-            File vaultFile = new File(vaultDir, fileName);
-            try (FileOutputStream fos = new FileOutputStream(vaultFile)) {
-                fos.write(data);
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
-                values.put(MediaStore.Downloads.MIME_TYPE, mimeType != null ? mimeType : "application/octet-stream");
-                values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/EduTechMindset");
-                ContentResolver resolver = getContentResolver();
-                Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                if (uri != null) {
-                    try (OutputStream os = resolver.openOutputStream(uri)) {
-                        if (os != null) os.write(data);
-                    }
-                }
-            } else {
-                File dlDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "EduTechMindset");
-                if (!dlDir.exists()) dlDir.mkdirs();
-                try (FileOutputStream fos = new FileOutputStream(new File(dlDir, fileName))) {
-                    fos.write(data);
-                }
-            }
-
-            String finalName = fileName;
-            runOnUiThread(() -> Toast.makeText(this, "تم حفظ الملف في المكتبة والتنزيلات: " + finalName, Toast.LENGTH_LONG).show());
-        } catch (Exception e) {
-            runOnUiThread(() -> Toast.makeText(this, "تعذر الحفظ في التنزيلات", Toast.LENGTH_SHORT).show());
-        }
+    private void openVideoPlayer(File file) {
+        Dialog dlg = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout box = new FrameLayout(this);
+        box.setBackgroundColor(Color.BLACK);
+        VideoView vv = new VideoView(this);
+        vv.setVideoPath(file.getAbsolutePath());
+        MediaController mc = new MediaController(this);
+        mc.setAnchorView(vv);
+        vv.setMediaController(mc);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        lp.gravity = Gravity.CENTER;
+        box.addView(vv, lp);
+        Button close = new Button(this);
+        close.setText("✕");
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.gravity = Gravity.TOP | Gravity.END;
+        close.setOnClickListener(v -> dlg.dismiss());
+        box.addView(close, clp);
+        dlg.setContentView(box);
+        dlg.show();
+        vv.start();
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) { super.onRequestPermissionsResult(requestCode, permissions, grantResults); if (requestCode == 105 && pendingWebPermissionRequest != null) { boolean ok = grantResults.length > 0; for (int r : grantResults) { if (r != PackageManager.PERMISSION_GRANTED) { ok = false; break; } } if (ok) { pendingWebPermissionRequest.grant(pendingWebPermissionRequest.getResources()); } else { pendingWebPermissionRequest.deny(); } pendingWebPermissionRequest = null; } } @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_FILE_CHOOSER) {
-            if (fileUploadCallback != null) {
-                Uri[] results = null; if (resultCode == Activity.RESULT_OK) { if (data != null && data.getClipData() != null) { int count = data.getClipData().getItemCount(); results = new Uri[count]; for (int i = 0; i < count; i++) { results[i] = data.getClipData().getItemAt(i).getUri(); } } else if (data != null && data.getData() != null) { results = new Uri[]{data.getData()}; } else if (cameraCaptureUri != null) { results = new Uri[]{cameraCaptureUri}; } } cameraCaptureUri = null;
-                        //
-                fileUploadCallback.onReceiveValue(results);
-                fileUploadCallback = null;
+        if (requestCode == REQ_FILE) {
+            if (filePathCallback != null) {
+                Uri[] res = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+                filePathCallback.onReceiveValue(res);
+                filePathCallback = null;
             }
-        } else if (requestCode == REQ_IMPORT_VAULT && resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
-            importUriToVault(data.getData());
-        } else if (requestCode == REQ_VOICE_INPUT && resultCode == Activity.RESULT_OK && data != null) {
-            ArrayList<String> matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            if (matches != null && !matches.isEmpty()) {
-                sendVoiceTextToWebAssistant(matches.get(0));
+        } else if (requestCode == REQ_VOICE && resultCode == RESULT_OK && data != null) {
+            ArrayList<String> res = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+            if (res != null && !res.isEmpty()) {
+                String text = res.get(0);
+                webView.evaluateJavascript("try{var el=document.activeElement;if(el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA')){el.value=" + JSONObject.quote(text) + ";el.dispatchEvent(new Event('input',{bubbles:true}));}}catch(e){}", null);
             }
-        } else if (requestCode == REQ_OVERLAY_PERMISSION) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
-                toggleOverlayAssistant();
-            }
-        }
-    }
-
-    private void importUriToVault(Uri uri) {
-        try {
-            String name = "file_" + System.currentTimeMillis();
-            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    int idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                    if (idx >= 0) name = cursor.getString(idx);
-                }
-            }
-            File dest = new File(vaultDir, name);
-            try (InputStream in = getContentResolver().openInputStream(uri);
-                 FileOutputStream out = new FileOutputStream(dest)) {
-                byte[] buf = new byte[8192];
-                int len;
-                while (in != null && (len = in.read(buf)) != -1) {
-                    out.write(buf, 0, len);
-                }
-            }
-            Toast.makeText(this, "تمت إضافة " + name + " إلى مكتبتي", Toast.LENGTH_SHORT).show();
-            openVaultFile(dest);
-        } catch (Exception e) {
-            Toast.makeText(this, "فشل استيراد الملف", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void sendVoiceTextToWebAssistant(String spokenText) {
-        String escaped = JSONObject.quote(spokenText);
-        String js = "(function(){" +
-                "var txt=" + escaped + ";" +
-                "var el=document.querySelector('textarea, input[type=\"text\"], input:not([type]), [contenteditable=\"true\"]');" +
-                "if(el){" +
-                "el.focus();" +
-                "if(el.tagName==='TEXTAREA'||el.tagName==='INPUT'){el.value=txt;el.dispatchEvent(new Event('input',{bubbles:true}));}" +
-                "else{el.innerText=txt;el.dispatchEvent(new Event('input',{bubbles:true}));}" +
-                "var form=el.closest('form');if(form){form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));}" +
-                "}" +
-                "})();";
-        if (webView != null) {
-            webView.evaluateJavascript(js, null);
-        }
-        Toast.makeText(this, "تم إرسال: " + spokenText, Toast.LENGTH_SHORT).show();
-    }
-
-    private void requestAppPermissions() {
-        List<String> perms = new ArrayList<>();
-        perms.add(Manifest.permission.RECORD_AUDIO);
-        perms.add(Manifest.permission.CAMERA);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            perms.add(Manifest.permission.POST_NOTIFICATIONS);
-            perms.add(Manifest.permission.READ_MEDIA_IMAGES);
-            perms.add(Manifest.permission.READ_MEDIA_AUDIO);
-            perms.add(Manifest.permission.READ_MEDIA_VIDEO);
-        } else {
-            perms.add(Manifest.permission.READ_EXTERNAL_STORAGE);
-        }
-        List<String> missing = new ArrayList<>();
-        for (String p : perms) {
-            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                missing.add(p);
-            }
-        }
-        if (!missing.isEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toArray(new String[0]), REQ_PERMISSIONS);
         }
     }
 
     @Override
     public void onBackPressed() {
-        if (popupContainer.getVisibility() == View.VISIBLE) {
-            closePopupWebView();
-        } else if (webView != null && webView.canGoBack()) {
+        if (webView != null && webView.canGoBack()) {
             webView.goBack();
-        } else {
+            return;
+        }
+        if (doubleBackToExit) {
             super.onBackPressed();
+            return;
+        }
+        doubleBackToExit = true;
+        Toast.makeText(this, "اضغط مرة أخرى للخروج", Toast.LENGTH_SHORT).show();
+        mainHandler.postDelayed(() -> doubleBackToExit = false, 2000);
+    }
+
+    private class AndroidVaultBridge {
+        @JavascriptInterface
+        public void saveDataUrl(String dataUrl, String name) {
+            saveDataUrlToDevice(dataUrl, name);
         }
     }
 
-    private int dpToPx(int dp) {
-        return Math.round(dp * getResources().getDisplayMetrics().density);
-    }
-    private void triggerNativePrint() { new AndroidVaultBridge().printCurrentPage(); }
-    
-    public class AndroidSessionBridge {
+    private class AndroidSessionBridge {
         @JavascriptInterface
-        public void saveSession(String json) {
-            if (json != null) {
-                sessionPrefs.edit().putString(KEY_SESSION_JSON, json).apply();
-            }
-        }
-
-        @JavascriptInterface
-        public String getSession() {
-            return sessionPrefs.getString(KEY_SESSION_JSON, "{}");
-        } @JavascriptInterface public void saveBase64File(String dataUrl, String fileName, String mimeType) { saveDataUrlToDevice(dataUrl, fileName, mimeType); }
-    }
-
-    public class AndroidVaultBridge {
-        @JavascriptInterface
-        public void saveBase64File(String dataUrl, String fileName, String mimeType) {
-            saveDataUrlToDevice(dataUrl, fileName, mimeType);
-        }
-
-        @JavascriptInterface
-        public void printCurrentPage() {
-            runOnUiThread(() -> {
-                PrintManager printManager = (PrintManager) getSystemService(Context.PRINT_SERVICE);
-                if (printManager != null && webView != null) {
-                    String jobName = "EduTech_Mindset_Print";
-                    printManager.print(jobName, webView.createPrintDocumentAdapter(jobName), new PrintAttributes.Builder().build());
-                }
-            });
+        public void syncSession(String json) {
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_SESSION_JSON, json).apply();
         }
     }
 
-    private static class IntroSplashView extends View {
-        private final Paint bgPaint = new Paint();
-        private final Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint particlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint titlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint subPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final ValueAnimator animator;
-        private float animProgress = 0f;
-        private final float[] px = new float[28];
-        private final float[] py = new float[28];
-        private final float[] pr = new float[28];
+    private static class MotionParticlesView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final float[] x = new float[28];
+        private final float[] y = new float[28];
+        private final float[] vy = new float[28];
+        private final Random rnd = new Random();
+        private boolean init = false;
 
-        public IntroSplashView(Context context) {
-            super(context);
-            Random rnd = new Random(42);
-            for (int i = 0; i < px.length; i++) {
-                px[i] = rnd.nextFloat();
-                py[i] = rnd.nextFloat();
-                pr[i] = 3f + rnd.nextFloat() * 7f;
-            }
-            ringPaint.setStyle(Paint.Style.STROKE);
-            ringPaint.setStrokeWidth(5f);
-            particlePaint.setColor(Color.parseColor("#38BDF8"));
-
-            titlePaint.setColor(Color.WHITE);
-            titlePaint.setTextSize(68f);
-            titlePaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            titlePaint.setTextAlign(Paint.Align.CENTER);
-
-            subPaint.setColor(Color.parseColor("#93C5FD"));
-            subPaint.setTextSize(38f);
-            subPaint.setTextAlign(Paint.Align.CENTER);
-
-            animator = ValueAnimator.ofFloat(0f, 1f);
-            animator.setDuration(2000);
-            animator.setRepeatCount(ValueAnimator.INFINITE);
-            animator.setInterpolator(new LinearInterpolator());
-            animator.addUpdateListener(a -> {
-                animProgress = (float) a.getAnimatedValue();
-                invalidate();
-            });
-            animator.start();
+        MotionParticlesView(Context ctx) {
+            super(ctx);
+            paint.setColor(Color.parseColor("#5538BDF8"));
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            int w = getWidth();
-            int h = getHeight();
-            float cx = w / 2f;
-            float cy = h / 2f;
-
-            bgPaint.setShader(new RadialGradient(cx, cy, Math.max(w, h) * 0.7f,
-                    Color.parseColor("#1E3A8A"), Color.parseColor("#020617"), Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, bgPaint);
-
-            for (int i = 0; i < px.length; i++) {
-                float yPos = ((py[i] + animProgress * 0.35f) % 1.0f) * h;
-                particlePaint.setAlpha(90 + (i % 5) * 30);
-                canvas.drawCircle(px[i] * w, yPos, pr[i], particlePaint);
+            int w = getWidth(), h = getHeight();
+            if (w == 0 || h == 0) return;
+            if (!init) {
+                for (int i = 0; i < x.length; i++) {
+                    x[i] = rnd.nextFloat() * w;
+                    y[i] = rnd.nextFloat() * h;
+                    vy[i] = 1.2f + rnd.nextFloat() * 2.5f;
+                }
+                init = true;
             }
-
-            for (int r = 0; r < 3; r++) {
-                float phase = (animProgress + r * 0.33f) % 1.0f;
-                ringPaint.setColor(Color.parseColor("#38BDF8"));
-                ringPaint.setAlpha((int) ((1f - phase) * 180));
-                canvas.drawCircle(cx, cy - 40f, 120f + phase * 260f, ringPaint);
+            for (int i = 0; i < x.length; i++) {
+                canvas.drawCircle(x[i], y[i], 4f + (i % 4) * 2f, paint);
+                y[i] -= vy[i];
+                if (y[i] < -10) { y[i] = h + 10; x[i] = rnd.nextFloat() * w; }
             }
-
-            canvas.drawText("EduTech Mindset", cx, cy - 20f, titlePaint);
-            canvas.drawText("إدارة الأستاذ باسل أشرف الفقعاوي", cx, cy + 55f, subPaint);
-        }
-
-        public void stopAnimation() {
-            if (animator != null) animator.cancel();
+            postInvalidateDelayed(30);
         }
     }
 }

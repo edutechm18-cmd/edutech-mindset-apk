@@ -1,5 +1,6 @@
 package com.aistudio.edutechmindset.bfkqaz;
 
+import android.graphics.Outline; import android.media.AudioFormat; import android.media.AudioManager; import android.media.AudioTrack; import android.os.Message; import android.view.HapticFeedbackConstants; import android.view.ViewOutlineProvider; import androidx.activity.OnBackPressedCallback;
 import android.Manifest;
 import android.animation.ObjectAnimator;
 import android.animation.PropertyValuesHolder;
@@ -98,6 +99,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQ_VOICE = 1004;
     private static final int REQ_OVERLAY = 1005;
 
+      private View quickMenuCard; private View videoViewerOverlay; private View pdfViewerOverlay; private View vaultOverlay; private WebView popupWebView;
     private FrameLayout rootLayout;
     private WebView webView;
     private ProgressBar progressBar;
@@ -163,7 +165,8 @@ public class MainActivity extends AppCompatActivity {
         setupDraggableAssistantButton();
         setupIntroSplash();
         requestNeededPermissions();
-
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) { @Override public void handleOnBackPressed() { handleSmartBack(); } });
+        
         if (isNetworkAvailable()) {
             webView.loadUrl(HOME_URL);
         } else {
@@ -249,7 +252,8 @@ public class MainActivity extends AppCompatActivity {
 
         webView.addJavascriptInterface(new AndroidVaultBridge(), "AndroidVault");
         webView.addJavascriptInterface(new AndroidSessionBridge(), "AndroidSession");
-
+        s.setSupportMultipleWindows(true); s.setJavaScriptCanOpenWindowsAutomatically(true); webView.addJavascriptInterface(new AndroidSessionBridge(), "AndroidSessionBridge");
+        
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
@@ -276,7 +280,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
-            @Override
+        
+                 @Override public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) { closeAuthPopupView(); popupWebView = new WebView(MainActivity.this); WebSettings ps = popupWebView.getSettings(); ps.setJavaScriptEnabled(true); ps.setDomStorageEnabled(true); ps.setJavaScriptCanOpenWindowsAutomatically(true); ps.setSupportMultipleWindows(true); CookieManager.getInstance().setAcceptCookie(true); CookieManager.getInstance().setAcceptThirdPartyCookies(popupWebView, true); popupWebView.addJavascriptInterface(new AndroidSessionBridge(), "AndroidSessionBridge"); popupWebView.setWebViewClient(new WebViewClient() { @Override public void onPageFinished(WebView pv, String url) { pv.evaluateJavascript("window.close = function() { if (window.AndroidSessionBridge) window.AndroidSessionBridge.closeAuthPopup(); };", null); } }); popupWebView.setWebChromeClient(new WebChromeClient() { @Override public void onCloseWindow(WebView window) { closeAuthPopupView(); } }); rootLayout.addView(popupWebView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)); WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj; transport.setWebView(popupWebView); resultMsg.sendToTarget(); return true; }
             public void onProgressChanged(WebView view, int newProgress) {
                 progressBar.setProgress(newProgress);
                 progressBar.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
@@ -371,7 +376,8 @@ public class MainActivity extends AppCompatActivity {
         ImageView img = new ImageView(this);
         img.setImageResource(R.mipmap.ic_launcher);
         img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        assistButton.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+               img.setOutlineProvider(new ViewOutlineProvider() { @Override public void getOutline(View view, Outline outline) { outline.setOval(0, 0, view.getWidth(), view.getHeight()); } }); img.setClipToOutline(true);
+                assistButton.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
         lp.gravity = Gravity.TOP | Gravity.START;
@@ -398,6 +404,7 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 case MotionEvent.ACTION_UP:
                     if (Math.hypot(e.getRawX() - d[2], e.getRawY() - d[3]) < dp(8)) {
+                             playClickFeedback(v);
                         showQuickAssistantMenu();
                     } else {
                         int mid = rootLayout.getWidth() / 2;
@@ -470,6 +477,7 @@ public class MainActivity extends AppCompatActivity {
         center.setGravity(Gravity.CENTER);
 
         ImageView logo = new ImageView(this);
+                logo.setScaleType(ImageView.ScaleType.CENTER_CROP); logo.setOutlineProvider(new ViewOutlineProvider() { @Override public void getOutline(View view, Outline outline) { outline.setOval(0, 0, view.getWidth(), view.getHeight()); } }); logo.setClipToOutline(true);
         logo.setImageResource(R.mipmap.ic_launcher);
         LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(110), dp(110));
         center.addView(logo, logoLp);
@@ -487,14 +495,14 @@ public class MainActivity extends AppCompatActivity {
         appTitle.setTextColor(Color.WHITE);
         appTitle.setTextSize(24f);
         appTitle.setPadding(0, dp(18), 0, dp(24));
-        center.addView(appTitle);
+        appTitle.setGravity(Gravity.CENTER); center.addView(appTitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)); TextView appSub = new TextView(this); appSub.setText("منصة التعليم الذكي"); appSub.setTextColor(Color.parseColor("#38BDF8")); appSub.setTextSize(16f); appSub.setGravity(Gravity.CENTER); appSub.setPadding(0, dp(4), 0, dp(8)); center.addView(appSub, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)); TextView appTag = new TextView(this); appTag.setText("استعد لرحلة تعلّم استثنائية"); appTag.setTextColor(Color.parseColor("#CBD5E1")); appTag.setTextSize(14f); appTag.setGravity(Gravity.CENTER); appTag.setPadding(0, 0, 0, dp(24)); center.addView(appTag, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         Button enterBtn = new Button(this);
         enterBtn.setText("🚀 ادخل التطبيق");
         enterBtn.setVisibility(View.INVISIBLE);
         enterBtn.setAlpha(0f);
-        enterBtn.setOnClickListener(v -> dismissSplash());
-        center.addView(enterBtn);
+        enterBtn.setTextColor(Color.parseColor("#0F172A")); enterBtn.setAllCaps(false); enterBtn.setPadding(dp(28), dp(12), dp(28), dp(12)); android.graphics.drawable.GradientDrawable enterBg = new android.graphics.drawable.GradientDrawable(); enterBg.setColor(Color.parseColor("#38BDF8")); enterBg.setCornerRadius(dp(999)); enterBtn.setBackground(enterBg); enterBtn.setOnClickListener(v -> { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); playClickFeedback(); dismissSplash(); }); playIntroChime();
+        LinearLayout.LayoutParams enterLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT); enterLp.gravity = Gravity.CENTER; center.addView(enterBtn, enterLp);
 
         splashOverlay.addView(center, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -881,7 +889,7 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == REQ_FILE) {
             if (filePathCallback != null) {
                 Uri[] res = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
-                filePathCallback.onReceiveValue(res);
+                if (res != null && res.length > 0) playSuccessChime(); filePathCallback.onReceiveValue(res);
                 filePathCallback = null;
             }
         } else if (requestCode == REQ_VOICE && resultCode == RESULT_OK && data != null) {
@@ -894,13 +902,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onBackPressed() {
+    public void onBackPressed() { handleSmartBack(); } private void handleSmartBack() { if (popupWebView != null) { if (popupWebView.canGoBack()) { popupWebView.goBack(); return; } closeAuthPopupView(); return; }
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
             return;
         }
         if (doubleBackToExit) {
-            super.onBackPressed();
+            finish();
             return;
         }
         doubleBackToExit = true;
@@ -915,7 +923,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private class AndroidSessionBridge {
+    private void closeAuthPopupView() { if (popupWebView != null) { try { if (rootLayout != null) rootLayout.removeView(popupWebView); popupWebView.stopLoading(); popupWebView.destroy(); } catch (Exception ignored) {} popupWebView = null; } } private void playToneSequence(final double[] freqs, final int noteMs, final double gain) { new Thread(() -> { AudioTrack track = null; try { int sr = 22050, spn = (sr * noteMs) / 1000, tot = spn * freqs.length; short[] buf = new short[tot]; for (int n = 0; n < freqs.length; n++) { double f = freqs[n]; int off = n * spn, fade = Math.min(200, spn / 4); for (int i = 0; i < spn; i++) { double env = (i < fade) ? (double) i / fade : (i > spn - fade ? (double) (spn - i) / fade : 1.0); buf[off + i] = (short) (Math.sin(2.0 * Math.PI * i * f / sr) * Short.MAX_VALUE * gain * env); } } int minB = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT); track = new AudioTrack(AudioManager.STREAM_MUSIC, sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(minB, tot * 2), AudioTrack.MODE_STATIC); track.write(buf, 0, tot); track.play(); Thread.sleep((long) noteMs * freqs.length + 60); } catch (Exception ignored) {} finally { if (track != null) { try { track.stop(); } catch (Exception ignored) {} try { track.release(); } catch (Exception ignored) {} } } }).start(); } private void playIntroChime() { playToneSequence(new double[]{523.25, 659.25, 783.99, 1046.50}, 140, 0.25); } private void playClickFeedback() { playToneSequence(new double[]{880.0}, 45, 0.20); } private void playSuccessChime() { playToneSequence(new double[]{587.33, 880.0, 1174.66}, 110, 0.25); } private class AndroidSessionBridge { @JavascriptInterface public void closeAuthPopup() { runOnUiThread(() -> closeAuthPopupView()); }
         @JavascriptInterface
         public void syncSession(String json) {
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_SESSION_JSON, json).apply();

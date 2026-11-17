@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="voice_assistant"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_voice"
+        android:shortcutLongLabel="@string/shortcut_voice">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.aistudio.edutechmindset.bfkqaz"
+            android:targetClass="com.aistudio.edutechmindset.bfkqaz.MainActivity">
+            <extra android:name="SHORTCUT_ACTION" android:value="VOICE" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="offline_vault"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_vault"
+        android:shortcutLongLabel="@string/shortcut_vault">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.aistudio.edutechmindset.bfkqaz"
+            android:targetClass="com.aistudio.edutechmindset.bfkqaz.MainActivity">
+            <extra android:name="SHORTCUT_ACTION" android:value="VAULT" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="overlay_bubble"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_overlay"
+        android:shortcutLongLabel="@string/shortcut_overlay">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.aistudio.edutechmindset.bfkqaz"
+            android:targetClass="com.aistudio.edutechmindset.bfkqaz.MainActivity">
+            <extra android:name="SHORTCUT_ACTION" android:value="OVERLAY" />
+        </intent>
+    </shortcut>
+</shortcuts>

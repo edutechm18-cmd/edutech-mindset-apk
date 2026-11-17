@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_voice">اسأل المساعد صوتياً</string>
+    <string name="shortcut_vault">مكتبتي الأوفلاين</string>
+    <string name="shortcut_overlay">المساعد العائم</string>
+</resources>

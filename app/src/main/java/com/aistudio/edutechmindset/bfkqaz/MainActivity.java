@@ -404,7 +404,7 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 case MotionEvent.ACTION_UP:
                     if (Math.hypot(e.getRawX() - d[2], e.getRawY() - d[3]) < dp(8)) {
-                             playClickFeedback(v);
+                             playClickFeedback();
                         showQuickAssistantMenu();
                     } else {
                         int mid = rootLayout.getWidth() / 2;

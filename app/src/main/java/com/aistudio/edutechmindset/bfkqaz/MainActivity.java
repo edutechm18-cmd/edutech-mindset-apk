@@ -1,5 +1,5 @@
 package com.aistudio.edutechmindset.bfkqaz;
-import android.annotation.SuppressLint; import android.Manifest; import android.animation.ValueAnimator;
+import android.annotation.SuppressLint; import android.Manifest; import android.animation.ValueAnimator; import android.animation.ObjectAnimator; import android.animation.PropertyValuesHolder;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -316,7 +316,7 @@ private Uri cameraCaptureUri;
                 "}}" +
                 "}catch(e){}" +
                 "})();";
-        view.evaluateJavascript(js + "
+        view.evaluateJavascript(js + "\n" + 
 " + SESSION_AND_FILE_BRIDGE_JS, null);
     }
 
@@ -429,7 +429,7 @@ private Uri cameraCaptureUri;
     private void setupIntroMotionGraphics() {
         splashView = new IntroSplashView(this);
         rootLayout.addView(splashView, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)); android.widget.ImageView logoImg = new android.widget.ImageView(this); logoImg.setTag("splashLogo"); logoImg.setImageResource(R.mipmap.ic_launcher); rootLayout.addView(logoImg, new FrameLayout.LayoutParams(240, 240, android.view.Gravity.CENTER)); ObjectAnimator pulseAnim = ObjectAnimator.ofPropertyValuesHolder(logoImg, PropertyValuesHolder.ofFloat(View.SCALE_X, 0.92f, 1.08f), PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.92f, 1.08f)); pulseAnim.setDuration(900); pulseAnim.setRepeatCount(ValueAnimator.INFINITE); pulseAnim.setRepeatMode(ValueAnimator.REVERSE); pulseAnim.start();
         splashView.setOnClickListener(v -> {
             triggerHaptic(v);
             dismissSplash();
@@ -437,7 +437,7 @@ private Uri cameraCaptureUri;
         mainHandler.postDelayed(this::dismissSplash, 2300);
     }
 
-    private void dismissSplash() {
+    private void dismissSplash() { View logo = rootLayout.findViewWithTag("splashLogo"); if (logo != null && logo.getParent() != null) { logo.animate().alpha(0f).setDuration(450).withEndAction(() -> { if (logo.getParent() != null) rootLayout.removeView(logo); }).start(); }
         if (splashView != null && splashView.getParent() != null) {
             splashView.animate().alpha(0f).setDuration(450).withEndAction(() -> {
                 if (splashView.getParent() != null) {
@@ -551,10 +551,10 @@ private Uri cameraCaptureUri;
                     dialog.dismiss();
                     openVaultFile(f);
                 });
-                listLayout.addView(itemBtn);
+                LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); rLp.bottomMargin = dpToPx(8); row.setLayoutParams(rLp); itemBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dpToPx(44), 1f)); row.addView(itemBtn); Button pubBtn = createBarButton("📤 للمنصة", "#0EA5E9"); LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(44)); pLp.leftMargin = dpToPx(6); pubBtn.setLayoutParams(pLp); pubBtn.setOnClickListener(v -> { triggerHaptic(v); dialog.dismiss(); publishFileToWebApp(f); }); row.addView(pubBtn); listLayout.addView(row);
             }
         }
-        dialog.show();
+        dialog.show();    private void publishFileToWebApp(File file) { new Thread(() -> { try { java.io.FileInputStream fis = new java.io.FileInputStream(file); java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(); byte[] buf = new byte[8192]; int len; while ((len = fis.read(buf)) != -1) bos.write(buf, 0, len); fis.close(); String b64 = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP); String name = file.getName(); String lower = name.toLowerCase(Locale.ROOT); String mime = lower.endsWith(".pdf") ? "application/pdf" : (lower.endsWith(".mp3") ? "audio/mpeg" : (lower.endsWith(".png") ? "image/png" : (lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : "application/octet-stream"))); String js = "(function(){try{var b64='" + b64 + "',name=" + org.json.JSONObject.quote(name) + ",mime='" + mime + "';var bin=atob(b64),arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);var f=new File([arr],name,{type:mime});var inp=document.querySelector('input[type=\"file\"]');if(inp){var dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;inp.dispatchEvent(new Event('change',{bubbles:true}));}window.dispatchEvent(new CustomEvent('edutech-local-file',{detail:{name:name,mime:mime,base64:b64,file:f}}));}catch(e){console.error(e);}})();"; mainHandler.post(() -> { if (webView != null) webView.evaluateJavascript(js, null); }); } catch (Exception ignored) {} }).start(); }
     }
 
     private void openVaultFile(File file) {

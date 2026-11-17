@@ -557,7 +557,7 @@ private Uri cameraCaptureUri;
         dialog.show();  
     }
     private void publishFileToWebApp(File file) { new Thread(() -> { try { java.io.FileInputStream fis = new java.io.FileInputStream(file); java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(); byte[] buf = new byte[8192]; int len; while ((len = fis.read(buf)) != -1) bos.write(buf, 0, len); fis.close(); String b64 = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP); String name = file.getName(); String lower = name.toLowerCase(Locale.ROOT); String mime = lower.endsWith(".pdf") ? "application/pdf" : (lower.endsWith(".mp3") ? "audio/mpeg" : (lower.endsWith(".png") ? "image/png" : (lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : "application/octet-stream"))); String js = "(function(){try{var b64='" + b64 + "',name=" + org.json.JSONObject.quote(name) + ",mime='" + mime + "';var bin=atob(b64),arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);var f=new File([arr],name,{type:mime});var inp=document.querySelector('input[type=\"file\"]');if(inp){var dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;inp.dispatchEvent(new Event('change',{bubbles:true}));}window.dispatchEvent(new CustomEvent('edutech-local-file',{detail:{name:name,mime:mime,base64:b64,file:f}}));}catch(e){console.error(e);}})();"; mainHandler.post(() -> { if (webView != null) webView.evaluateJavascript(js, null); }); } catch (Exception ignored) {} }).start(); }
-    }
+    
 
     private void openVaultFile(File file) {
         String lower = file.getName().toLowerCase(Locale.ROOT);

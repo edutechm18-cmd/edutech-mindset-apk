@@ -63,7 +63,7 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatActivity; import androidx.core.graphics.Insets; import androidx.core.view.ViewCompat; import androidx.core.view.WindowCompat; import androidx.core.view.WindowInsetsCompat; import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -95,7 +95,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQ_VOICE_INPUT = 1004;
     private static final int REQ_OVERLAY_PERMISSION = 1005;
 
-    private FrameLayout rootLayout;
+    private FrameLayout rootLayout; private LinearLayout mainColumn; private LinearLayout audioPlayerBar; private LinearLayout bottomControlBar;
     private WebView webView;
     private FrameLayout popupContainer;
     private WebView popupWebView;
@@ -119,7 +119,7 @@ private Uri cameraCaptureUri;
             vaultDir.mkdirs();
         }
 
-        rootLayout = new FrameLayout(this);
+        setupCleanSystemBars(); rootLayout = new FrameLayout(this); mainColumn = new LinearLayout(this); mainColumn.setOrientation(LinearLayout.VERTICAL); mainColumn.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)); rootLayout.addView(mainColumn); ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, windowInsets) -> { Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()); v.setPadding(insets.left, insets.top, insets.right, insets.bottom); return WindowInsetsCompat.CONSUMED; });
         rootLayout.setBackgroundColor(Color.parseColor("#0F172A"));
         setContentView(rootLayout);
 
@@ -131,7 +131,7 @@ private Uri cameraCaptureUri;
         requestAppPermissions();
         webView.loadUrl(HOME_URL);
 
-        handleIncomingIntent(getIntent());
+        handleIncomingIntent(getIntent()); if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)) { try { Intent overlaySvc = new Intent(this, OverlayAssistantService.class); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(overlaySvc); else startService(overlaySvc); } catch (Exception ignored) {} }
     }
 
     @Override
@@ -153,15 +153,15 @@ private Uri cameraCaptureUri;
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    private void setupCleanSystemBars() { WindowCompat.setDecorFitsSystemWindows(getWindow(), false); getWindow().setStatusBarColor(Color.parseColor("#0B1120")); getWindow().setNavigationBarColor(Color.parseColor("#0F172A")); WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()); if (c != null) { c.setAppearanceLightStatusBars(false); c.setAppearanceLightNavigationBars(false); } } @SuppressLint("SetJavaScriptEnabled")
     private void setupWebView() {
         webView = new WebView(this);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         );
-        lp.bottomMargin = dpToPx(52);
-        webView.setLayoutParams(lp);
+         
+        webView.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         configureWebSettings(webView.getSettings());
         CookieManager cm = CookieManager.getInstance();
@@ -254,7 +254,7 @@ private Uri cameraCaptureUri;
                 }
                 fileUploadCallback = filePathCallback;
                 try {
-                    Intent contentIntent = fileChooserParams.createIntent(); if (fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) { contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); } Intent takePictureIntent = null; cameraCaptureUri = null; if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) { try { java.io.File photoFile = java.io.File.createTempFile("cam_" + System.currentTimeMillis(), ".jpg", getCacheDir()); cameraCaptureUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", photoFile); takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE); takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraCaptureUri); takePictureIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { cameraCaptureUri = null; takePictureIntent = null; } } Intent intent = Intent.createChooser(contentIntent, "اختر ملفاً أو التقط صورة بالكاميرا"); if (takePictureIntent != null) { intent.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{takePictureIntent}); }
+                    Intent contentIntent = new Intent(Intent.ACTION_GET_CONTENT); contentIntent.addCategory(Intent.CATEGORY_OPENABLE); contentIntent.setType("*/*"); contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); if (fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) { contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); } Intent takePictureIntent = null; cameraCaptureUri = null; if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) { try { java.io.File photoFile = java.io.File.createTempFile("cam_" + System.currentTimeMillis(), ".jpg", getCacheDir()); cameraCaptureUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", photoFile); takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE); takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraCaptureUri); takePictureIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { cameraCaptureUri = null; takePictureIntent = null; } } Intent intent = Intent.createChooser(contentIntent, "اختر ملفاً أو التقط صورة بالكاميرا"); if (takePictureIntent != null) { intent.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{takePictureIntent}); }
                     startActivityForResult(intent, REQ_FILE_CHOOSER);
                 } catch (Exception e) {
                     fileUploadCallback = null;
@@ -280,7 +280,7 @@ private Uri cameraCaptureUri;
             }
         });
 
-        rootLayout.addView(webView);
+        mainColumn.addView(webView);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -301,7 +301,7 @@ private Uri cameraCaptureUri;
         }
     }
 
-    private void injectSessionAndPrintHooks(WebView view) {
+    private static final String SESSION_AND_FILE_BRIDGE_JS = "(function(){if(window.__edutechFileBridge)return;window.__edutechFileBridge=true;function sendToApp(u,fn,mt){if(!u)return false;if(u.indexOf('data:')===0){if(window.AndroidSessionBridge)window.AndroidSessionBridge.saveBase64File(u,fn||('file_'+Date.now()),mt||'application/octet-stream');return true;}if(u.indexOf('blob:')===0){fetch(u).then(function(r){return r.blob();}).then(function(b){var fr=new FileReader();fr.onloadend=function(){if(window.AndroidSessionBridge)window.AndroidSessionBridge.saveBase64File(fr.result,fn||('file_'+Date.now()),b.type||mt||'application/octet-stream');};fr.readAsDataURL(b);}).catch(function(){});return true;}return false;}var origClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){var u=this.getAttribute('href')||this.href||'';var dl=this.getAttribute('download');if(dl!==null||u.indexOf('blob:')===0||u.indexOf('data:')===0){if(sendToApp(u,dl||this.download||'',this.type||''))return;}return origClick.apply(this,arguments);};document.addEventListener('click',function(e){var a=e.target&&e.target.closest?e.target.closest('a'):null;if(!a)return;var u=a.getAttribute('href')||a.href||'';var dl=a.getAttribute('download');if(dl!==null||u.indexOf('blob:')===0||u.indexOf('data:')===0){if(sendToApp(u,dl||a.download||'',a.type||'')){e.preventDefault();e.stopPropagation();}}},true);var origOpen=window.open;window.open=function(u){if(typeof u==='string'&&(u.indexOf('blob:')===0||u.indexOf('data:')===0)){if(sendToApp(u,'',''))return null;}return origOpen.apply(this,arguments);};})();"; private void injectSessionAndPrintHooks(WebView view) {
         String js = "(function(){" +
                 "try{" +
                 "if(window.AndroidSessionBridge){" +
@@ -316,7 +316,8 @@ private Uri cameraCaptureUri;
                 "}}" +
                 "}catch(e){}" +
                 "})();";
-        view.evaluateJavascript(js, null);
+        view.evaluateJavascript(js + "
+" + SESSION_AND_FILE_BRIDGE_JS, null);
     }
 
     private boolean handleUrlNavigation(Uri uri) {
@@ -405,7 +406,7 @@ private Uri cameraCaptureUri;
         bar.addView(btnLibrary);
         bar.addView(btnVoice);
         bar.addView(btnOverlay);
-        rootLayout.addView(bar, barLp);
+        Button btnBack = createBarButton("⬅", "#334155"); btnBack.setOnClickListener(v -> { triggerHaptic(v); if (webView.canGoBack()) webView.goBack(); }); Button btnHome = createBarButton("🏠", "#0284C7"); btnHome.setOnClickListener(v -> { triggerHaptic(v); webView.loadUrl(HOME_URL); }); Button btnReload = createBarButton("🔄", "#475569"); btnReload.setOnClickListener(v -> { triggerHaptic(v); webView.reload(); }); bar.addView(btnBack, 0); bar.addView(btnHome, 1); bar.addView(btnReload); bottomControlBar = bar; audioPlayerBar = new LinearLayout(this); audioPlayerBar.setOrientation(LinearLayout.HORIZONTAL); audioPlayerBar.setBackgroundColor(Color.parseColor("#1E293B")); audioPlayerBar.setVisibility(View.GONE); mainColumn.addView(audioPlayerBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)); mainColumn.addView(bottomControlBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
     private Button createBarButton(String text, String hexColor) {
